@@ -1,0 +1,109 @@
+import pool from '../database/database';
+
+// We'll define the Transaction type later in a models file
+interface TransactionData {
+  workspace_id: string;
+  user_id: string;
+  description: string;
+  amount: number;
+  type: 'income' | 'expense';
+  transaction_date: string;
+}
+
+// Function to verify user has access to the workspace
+const canAccessWorkspace = async (userId: string, workspaceId: string): Promise<boolean> => {
+    const client = await pool.connect();
+    try {
+        const result = await client.query(
+            'SELECT 1 FROM user_workspaces WHERE user_id = $1 AND workspace_id = $2',
+            [userId, workspaceId]
+        );
+        return result.rowCount > 0;
+    } finally {
+        client.release();
+    }
+};
+
+export const createTransaction = async (userId: string, data: TransactionData) => {
+    if (!await canAccessWorkspace(userId, data.workspace_id)) {
+        throw new Error('Forbidden: User does not have access to this workspace');
+    }
+
+    const { workspace_id, description, amount, type, transaction_date } = data;
+    const client = await pool.connect();
+    try {
+        const result = await client.query(
+            'INSERT INTO transactions (workspace_id, user_id, description, amount, type, transaction_date) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+            [workspace_id, userId, description, amount, type, transaction_date]
+        );
+        return result.rows[0];
+    } finally {
+        client.release();
+    }
+};
+
+export const getTransactionsByWorkspace = async (userId: string, workspaceId: string) => {
+    if (!await canAccessWorkspace(userId, workspaceId)) {
+        throw new Error('Forbidden: User does not have access to this workspace');
+    }
+
+    const client = await pool.connect();
+    try {
+        const result = await client.query(
+            'SELECT * FROM transactions WHERE workspace_id = $1 ORDER BY transaction_date DESC',
+            [workspaceId]
+        );
+        return result.rows;
+    } finally {
+        client.release();
+    }
+};
+
+export const updateTransaction = async (userId: string, transactionId: string, data: Partial<TransactionData>) => {
+    const client = await pool.connect();
+    try {
+        // First, verify the user has access to the workspace this transaction belongs to
+        const transactionResult = await client.query('SELECT workspace_id FROM transactions WHERE transaction_id = $1', [transactionId]);
+        if (transactionResult.rowCount === 0) {
+            throw new Error('Transaction not found');
+        }
+        const { workspace_id } = transactionResult.rows[0];
+
+        if (!await canAccessWorkspace(userId, workspace_id)) {
+            throw new Error('Forbidden: User does not have access to this workspace');
+        }
+
+        // Dynamically build the update query
+        const fields = Object.keys(data);
+        const values = Object.values(data);
+        const setClause = fields.map((field, index) => `${field} = $${index + 2}`).join(', ');
+
+        const query = `UPDATE transactions SET ${setClause} WHERE transaction_id = $1 RETURNING *`;
+        const result = await client.query(query, [transactionId, ...values]);
+
+        return result.rows[0];
+    } finally {
+        client.release();
+    }
+}
+
+export const deleteTransaction = async (userId: string, transactionId: string) => {
+    const client = await pool.connect();
+    try {
+        // First, verify the user has access to the workspace this transaction belongs to
+        const transactionResult = await client.query('SELECT workspace_id FROM transactions WHERE transaction_id = $1', [transactionId]);
+        if (transactionResult.rowCount === 0) {
+            throw new Error('Transaction not found');
+        }
+        const { workspace_id } = transactionResult.rows[0];
+
+        if (!await canAccessWorkspace(userId, workspace_id)) {
+            throw new Error('Forbidden: User does not have access to this workspace');
+        }
+
+        await client.query('DELETE FROM transactions WHERE transaction_id = $1', [transactionId]);
+        return { message: 'Transaction deleted successfully' };
+    } finally {
+        client.release();
+    }
+}
