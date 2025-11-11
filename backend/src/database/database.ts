@@ -1,16 +1,15 @@
 import { Pool } from 'pg';
 import 'dotenv/config';
 
+// The Pool constructor can directly use the DATABASE_URL environment variable
+// if it's available, which is set in our docker-compose.yml.
+// For local development outside Docker, it would read from the .env file.
 const pool = new Pool({
-  user: process.env.POSTGRES_USER,
-  host: process.env.DB_HOST,
-  database: process.env.POSTGRES_DB,
-  password: process.env.POSTGRES_PASSWORD,
-  port: Number(process.env.DB_PORT),
+  connectionString: process.env.DATABASE_URL,
 });
 
 pool.on('connect', () => {
-  console.log('Connected to the database!');
+  console.log('Successfully connected to the PostgreSQL database!');
 });
 
 pool.on('error', (err) => {
