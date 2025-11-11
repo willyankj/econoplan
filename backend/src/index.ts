@@ -1,5 +1,6 @@
 import express, { Request, Response, NextFunction } from 'express';
 import 'dotenv/config';
+import cors from 'cors';
 import authRoutes from './routes/auth.routes';
 import transactionRoutes from './routes/transactions.routes';
 import categoryRoutes from './routes/category.routes';
@@ -8,6 +9,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Middlewares
+app.use(cors()); // Enable CORS for all routes
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
