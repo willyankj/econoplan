@@ -36,6 +36,16 @@ CREATE TABLE user_workspaces (
     PRIMARY KEY (user_id, workspace_id)
 );
 
+-- Categories Table
+CREATE TABLE categories (
+    category_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    workspace_id UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
+    category_name VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(workspace_id, category_name) -- Ensure category names are unique within a workspace
+);
+
 -- Transactions Table
 CREATE TYPE transaction_type AS ENUM ('income', 'expense');
 
@@ -43,6 +53,7 @@ CREATE TABLE transactions (
     transaction_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     workspace_id UUID NOT NULL REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES users(user_id),
+    category_id UUID REFERENCES categories(category_id) ON DELETE SET NULL, -- Optional category
     description VARCHAR(255) NOT NULL,
     amount NUMERIC(12, 2) NOT NULL,
     type transaction_type NOT NULL,
@@ -52,6 +63,7 @@ CREATE TABLE transactions (
 );
 
 -- Indexes for performance
+CREATE INDEX idx_categories_workspace_id ON categories(workspace_id);
 CREATE INDEX idx_transactions_workspace_id ON transactions(workspace_id);
 CREATE INDEX idx_transactions_user_id ON transactions(user_id);
 CREATE INDEX idx_user_workspaces_user_id ON user_workspaces(user_id);

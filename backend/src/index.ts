@@ -2,6 +2,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import 'dotenv/config';
 import authRoutes from './routes/auth.routes';
 import transactionRoutes from './routes/transactions.routes';
+import categoryRoutes from './routes/category.routes';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -13,6 +14,7 @@ app.use(express.urlencoded({ extended: true }));
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/transactions', transactionRoutes);
+app.use('/api/categories', categoryRoutes);
 
 // Rota de Health Check
 app.get('/health', (req: Request, res: Response) => {

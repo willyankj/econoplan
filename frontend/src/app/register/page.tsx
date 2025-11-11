@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import api from '@/services/api';
 
 export default function RegisterPage() {
@@ -64,6 +65,12 @@ export default function RegisterPage() {
             Create Account
           </button>
         </form>
+        <p className="mt-4 text-center text-sm text-gray-600">
+          Already have an account?{' '}
+          <Link href="/login" className="font-medium text-indigo-600 hover:text-indigo-500">
+            Sign in
+          </Link>
+        </p>
       </div>
     </div>
   );
