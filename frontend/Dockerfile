@@ -1,6 +1,12 @@
 # Use an official Node.js runtime as a parent image
 FROM node:20-alpine
 
+# Arguments that can be passed during the build
+ARG NEXT_PUBLIC_API_URL
+
+# Environment variables
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+
 # Set the working directory in the container
 WORKDIR /usr/src/app
 
