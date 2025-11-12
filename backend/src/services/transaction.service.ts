@@ -38,7 +38,11 @@ export const getTransactionsByWorkspace = async (userId: string, workspaceId: st
     const client = await pool.connect();
     try {
         const result = await client.query(
-            'SELECT * FROM transactions WHERE workspace_id = $1 ORDER BY transaction_date DESC',
+            `SELECT t.*, a.account_name
+             FROM transactions t
+             JOIN accounts a ON t.account_id = a.account_id
+             WHERE t.workspace_id = $1
+             ORDER BY t.transaction_date DESC, t.created_at DESC`,
             [workspaceId]
         );
         return result.rows;
@@ -92,16 +96,19 @@ export const createTransfer = async (userId: string, data: {
     try {
         await client.query('BEGIN');
 
-        // Create expense transaction
+        const transferIdResult = await client.query('SELECT uuid_generate_v4() as transfer_id');
+        const transferId = transferIdResult.rows[0].transfer_id;
+
+        // Create expense transaction from source account
         await client.query(
-            'INSERT INTO transactions (workspace_id, user_id, account_id, description, amount, type, transaction_date) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
-            [workspace_id, userId, from_account_id, description, amount, 'expense', transaction_date]
+            'INSERT INTO transactions (workspace_id, user_id, account_id, description, amount, type, transaction_date, transfer_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+            [workspace_id, userId, from_account_id, description, -amount, 'transfer', transaction_date, transferId]
         );
 
-        // Create income transaction
+        // Create income transaction to destination account
         await client.query(
-            'INSERT INTO transactions (workspace_id, user_id, account_id, description, amount, type, transaction_date) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
-            [workspace_id, userId, to_account_id, description, amount, 'income', transaction_date]
+            'INSERT INTO transactions (workspace_id, user_id, account_id, description, amount, type, transaction_date, transfer_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+            [workspace_id, userId, to_account_id, description, amount, 'transfer', transaction_date, transferId]
         );
 
         // Update balances

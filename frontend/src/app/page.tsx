@@ -9,8 +9,19 @@ import AccountManager from '@/components/AccountManager';
 import EditTransactionModal, { Transaction } from '@/components/EditTransactionModal';
 import TransferForm from '@/components/TransferForm';
 
-// Redefine Category here to be passed down, though this is not ideal.
 // A better solution would be a shared types file.
+interface Transaction {
+  transaction_id: string;
+  description: string;
+  amount: number;
+  type: 'income' | 'expense' | 'transfer';
+  category_id?: string | null;
+  transfer_id?: string | null;
+  account_name: string;
+  from_account?: string;
+  to_account?: string;
+}
+
 interface Category {
   category_id: string;
   category_name: string;
@@ -39,6 +50,41 @@ export default function Home() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [activeForm, setActiveForm] = useState<'transaction' | 'transfer'>('transaction');
+
+  const processedTransactions = useMemo(() => {
+    const transferMap = new Map<string, Transaction[]>();
+    const regularTransactions: Transaction[] = [];
+
+    transactions.forEach(t => {
+      if (t.type === 'transfer' && t.transfer_id) {
+        if (!transferMap.has(t.transfer_id)) {
+          transferMap.set(t.transfer_id, []);
+        }
+        transferMap.get(t.transfer_id)!.push(t);
+      } else {
+        regularTransactions.push(t);
+      }
+    });
+
+    const transfers: Transaction[] = [];
+    for (const [transferId, group] of transferMap.entries()) {
+      if (group.length === 2) {
+        const from = group.find(t => t.amount < 0)!;
+        const to = group.find(t => t.amount > 0)!;
+        transfers.push({
+          ...from, // a transaction_id to use as key
+          transaction_id: transferId,
+          description: from.description,
+          amount: Math.abs(from.amount),
+          type: 'transfer',
+          from_account: from.account_name,
+          to_account: to.account_name,
+        });
+      }
+    }
+
+    return [...regularTransactions, ...transfers].sort((a, b) => new Date(b.transaction_date).getTime() - new Date(a.transaction_date).getTime());
+  }, [transactions]);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -234,26 +280,36 @@ export default function Home() {
             <h2 className="mb-4 text-2xl font-semibold">Transações Recentes</h2>
             <div className="rounded-lg bg-white p-6 shadow-md">
               <ul className="space-y-3">
-                {transactions.map((t) => (
+                {processedTransactions.map((t) => (
                   <li key={t.transaction_id} className="flex items-center justify-between border-b pb-3">
                     <div>
                       <span className="block font-medium">{t.description}</span>
-                      {/* We will display category name here later */}
+                      <span className="text-sm text-gray-500">
+                        {t.type === 'transfer'
+                          ? `De: ${t.from_account} | Para: ${t.to_account}`
+                          : t.account_name}
+                      </span>
                     </div>
                     <div className="flex items-center gap-4">
-                      <span className={`font-semibold ${t.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
-                        R$ {t.amount}
+                      <span className={`font-semibold ${
+                        t.type === 'income' ? 'text-green-600'
+                        : t.type === 'expense' ? 'text-red-600'
+                        : 'text-gray-700'
+                      }`}>
+                        {t.type === 'expense' ? '-' : ''}R$ {t.amount}
                       </span>
-                      <div className="flex gap-2">
-                        <button onClick={() => handleOpenModal(t)} className="text-gray-400 hover:text-blue-600">✏️</button>
-                        <button onClick={() => handleDeleteTransaction(t.transaction_id)} className="text-gray-400 hover:text-red-600">🗑️</button>
-                      </div>
+                      {t.type !== 'transfer' && (
+                        <div className="flex gap-2">
+                          <button onClick={() => handleOpenModal(t)} className="text-gray-400 hover:text-blue-600">✏️</button>
+                          <button onClick={() => handleDeleteTransaction(t.transaction_id)} className="text-gray-400 hover:text-red-600">🗑️</button>
+                        </div>
+                      )}
                     </div>
                   </li>
                 ))}
               </ul>
             </div>
-            </div>
+          </div>
 
           {/* Category Manager Section */}
           {workspaceId && (

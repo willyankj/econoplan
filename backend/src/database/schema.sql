@@ -69,6 +69,7 @@ CREATE TABLE transactions (
     user_id UUID NOT NULL REFERENCES users(user_id),
     account_id UUID NOT NULL REFERENCES accounts(account_id) ON DELETE CASCADE,
     category_id UUID REFERENCES categories(category_id) ON DELETE SET NULL, -- Optional category
+    transfer_id UUID, -- Used to link two transactions in a transfer
     description VARCHAR(255) NOT NULL,
     amount NUMERIC(12, 2) NOT NULL,
     type transaction_type NOT NULL,
@@ -83,5 +84,6 @@ CREATE INDEX idx_categories_workspace_id ON categories(workspace_id);
 CREATE INDEX idx_transactions_workspace_id ON transactions(workspace_id);
 CREATE INDEX idx_transactions_user_id ON transactions(user_id);
 CREATE INDEX idx_transactions_account_id ON transactions(account_id);
+CREATE INDEX idx_transactions_transfer_id ON transactions(transfer_id);
 CREATE INDEX idx_user_workspaces_user_id ON user_workspaces(user_id);
 CREATE INDEX idx_user_workspaces_workspace_id ON user_workspaces(workspace_id);
