@@ -5,6 +5,7 @@ import { canAccessWorkspace } from '../utils/workspace.util';
 interface TransactionData {
   workspace_id: string;
   user_id: string;
+  account_id: string;
   description: string;
   amount: number;
   type: 'income' | 'expense';
@@ -16,12 +17,12 @@ export const createTransaction = async (userId: string, data: TransactionData) =
         throw new Error('Forbidden: User does not have access to this workspace');
     }
 
-    const { workspace_id, description, amount, type, transaction_date } = data;
+    const { workspace_id, account_id, description, amount, type, transaction_date } = data;
     const client = await pool.connect();
     try {
         const result = await client.query(
-            'INSERT INTO transactions (workspace_id, user_id, description, amount, type, transaction_date) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-            [workspace_id, userId, description, amount, type, transaction_date]
+            'INSERT INTO transactions (workspace_id, user_id, account_id, description, amount, type, transaction_date) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
+            [workspace_id, userId, account_id, description, amount, type, transaction_date]
         );
         return result.rows[0];
     } finally {

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import api from '@/services/api';
 import AuthGuard from '@/components/AuthGuard';
 import CategoryManager from '@/components/CategoryManager';
+import AccountManager from '@/components/AccountManager';
 import EditTransactionModal, { Transaction } from '@/components/EditTransactionModal';
 
 // Redefine Category here to be passed down, though this is not ideal.
@@ -14,15 +15,24 @@ interface Category {
   category_name: string;
 }
 
+interface Account {
+  account_id: string;
+  account_name: string;
+  account_type: string;
+  balance: number;
+}
+
 export default function Home() {
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [summary, setSummary] = useState({ totalIncome: 0, totalExpense: 0, balance: 0 });
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
   const [type, setType] = useState<'income' | 'expense'>('expense');
   const [categoryId, setCategoryId] = useState<string | ''>('');
+  const [accountId, setAccountId] = useState<string | ''>('');
   const router = useRouter();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -64,14 +74,16 @@ export default function Home() {
     const timestamp = new Date().getTime(); // Cache-busting parameter
 
     try {
-      const [transactionsRes, categoriesRes, summaryRes] = await Promise.all([
+      const [transactionsRes, categoriesRes, summaryRes, accountsRes] = await Promise.all([
         api.get(`/transactions?workspaceId=${id}&_=${timestamp}`),
         api.get(`/categories?workspaceId=${id}&_=${timestamp}`),
-        api.get(`/dashboard/summary?workspaceId=${id}&month=${month}&year=${year}&_=${timestamp}`)
+        api.get(`/dashboard/summary?workspaceId=${id}&month=${month}&year=${year}&_=${timestamp}`),
+        api.get(`/accounts?workspaceId=${id}&_=${timestamp}`)
       ]);
       setTransactions(transactionsRes.data);
       setCategories(categoriesRes.data);
       setSummary(summaryRes.data);
+      setAccounts(accountsRes.data);
     } catch (error) {
       console.error('Falha ao buscar dados', error);
     }
@@ -93,6 +105,7 @@ export default function Home() {
     try {
       const newTransaction = {
         workspace_id: workspaceId,
+        account_id: accountId,
         description,
         amount: parseFloat(amount),
         type,
@@ -104,6 +117,7 @@ export default function Home() {
       // Clear form
       setDescription('');
       setAmount('');
+      setAccountId('');
     } catch (error) {
       console.error('Failed to create transaction', error);
     }
@@ -150,6 +164,15 @@ export default function Home() {
               <div className="mb-4">
                 <label htmlFor="amount" className="block text-sm font-medium text-gray-700">Valor</label>
                 <input type="number" id="amount" value={amount} onChange={(e) => setAmount(e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm" required />
+              </div>
+              <div className="mb-4">
+                <label htmlFor="account" className="block text-sm font-medium text-gray-700">Conta</label>
+                <select id="account" value={accountId} onChange={(e) => setAccountId(e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm" required>
+                  <option value="">Selecione uma Conta</option>
+                  {accounts.map((acc) => (
+                    <option key={acc.account_id} value={acc.account_id}>{acc.account_name}</option>
+                  ))}
+                </select>
               </div>
               <div className="mb-4">
                 <label htmlFor="category" className="block text-sm font-medium text-gray-700">Categoria</label>
@@ -205,6 +228,15 @@ export default function Home() {
               categories={categories}
               workspaceId={workspaceId}
               onCategoryCreated={(newCategory) => setCategories([...categories, newCategory])}
+            />
+          )}
+
+          {/* Account Manager Section */}
+          {workspaceId && (
+            <AccountManager
+              accounts={accounts}
+              workspaceId={workspaceId}
+              onAccountCreated={(newAccount) => setAccounts([...accounts, newAccount])}
             />
           )}
           </div>
