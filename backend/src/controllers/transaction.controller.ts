@@ -82,3 +82,19 @@ export const deleteTransaction = async (req: Request, res: Response) => {
         res.status(500).json({ message: 'Error deleting transaction' });
     }
 };
+
+export const createTransfer = async (req: Request, res: Response) => {
+    try {
+        const userId = req.user?.userId;
+        if (!userId) {
+            return res.status(401).json({ message: 'User not authenticated' });
+        }
+        const result = await transactionService.createTransfer(userId, req.body);
+        res.status(201).json(result);
+    } catch (error) {
+        if (error instanceof Error) {
+            return res.status(403).json({ message: error.message });
+        }
+        res.status(500).json({ message: 'Error creating transfer' });
+    }
+}

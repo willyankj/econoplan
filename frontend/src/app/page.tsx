@@ -7,6 +7,7 @@ import AuthGuard from '@/components/AuthGuard';
 import CategoryManager from '@/components/CategoryManager';
 import AccountManager from '@/components/AccountManager';
 import EditTransactionModal, { Transaction } from '@/components/EditTransactionModal';
+import TransferForm from '@/components/TransferForm';
 
 // Redefine Category here to be passed down, though this is not ideal.
 // A better solution would be a shared types file.
@@ -37,6 +38,7 @@ export default function Home() {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+  const [activeForm, setActiveForm] = useState<'transaction' | 'transfer'>('transaction');
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -153,45 +155,76 @@ export default function Home() {
         </div>
 
         <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
-          {/* Form Section */}
+          {/* Form Section with Tabs */}
           <div className="md:col-span-1">
-            <h2 className="mb-4 text-2xl font-semibold">Nova Transação</h2>
-            <form onSubmit={handleSubmit} className="rounded-lg bg-white p-6 shadow-md">
-              <div className="mb-4">
-                <label htmlFor="description" className="block text-sm font-medium text-gray-700">Descrição</label>
-                <input type="text" id="description" value={description} onChange={(e) => setDescription(e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm" required />
+            <div className="mb-4 border-b border-gray-200">
+              <nav className="-mb-px flex space-x-8" aria-label="Tabs">
+                <button
+                  onClick={() => setActiveForm('transaction')}
+                  className={`${
+                    activeForm === 'transaction'
+                      ? 'border-indigo-500 text-indigo-600'
+                      : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                  } whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium`}
+                >
+                  Transação
+                </button>
+                <button
+                  onClick={() => setActiveForm('transfer')}
+                  className={`${
+                    activeForm === 'transfer'
+                      ? 'border-indigo-500 text-indigo-600'
+                      : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                  } whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium`}
+                >
+                  Transferência
+                </button>
+              </nav>
+            </div>
+
+            {activeForm === 'transaction' ? (
+              <div>
+                <h2 className="mb-4 text-2xl font-semibold">Nova Transação</h2>
+                <form onSubmit={handleSubmit} className="rounded-lg bg-white p-6 shadow-md">
+                  <div className="mb-4">
+                    <label htmlFor="description" className="block text-sm font-medium text-gray-700">Descrição</label>
+                    <input type="text" id="description" value={description} onChange={(e) => setDescription(e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm" required />
+                  </div>
+                  <div className="mb-4">
+                    <label htmlFor="amount" className="block text-sm font-medium text-gray-700">Valor</label>
+                    <input type="number" id="amount" value={amount} onChange={(e) => setAmount(e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm" required />
+                  </div>
+                  <div className="mb-4">
+                    <label htmlFor="account" className="block text-sm font-medium text-gray-700">Conta</label>
+                    <select id="account" value={accountId} onChange={(e) => setAccountId(e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm" required>
+                      <option value="">Selecione uma Conta</option>
+                      {accounts.map((acc) => (
+                        <option key={acc.account_id} value={acc.account_id}>{acc.account_name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="mb-4">
+                    <label htmlFor="category" className="block text-sm font-medium text-gray-700">Categoria</label>
+                    <select id="category" value={categoryId} onChange={(e) => setCategoryId(e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm">
+                      <option value="">Sem Categoria</option>
+                      {categories.map((c) => (
+                        <option key={c.category_id} value={c.category_id}>{c.category_name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="mb-6">
+                    <label htmlFor="type" className="block text-sm font-medium text-gray-700">Tipo</label>
+                    <select id="type" value={type} onChange={(e) => setType(e.target.value as any)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm">
+                      <option value="expense">Despesa</option>
+                      <option value="income">Receita</option>
+                    </select>
+                  </div>
+                  <button type="submit" className="w-full rounded-md bg-indigo-600 py-2 text-white hover:bg-indigo-700">Adicionar Transação</button>
+                </form>
               </div>
-              <div className="mb-4">
-                <label htmlFor="amount" className="block text-sm font-medium text-gray-700">Valor</label>
-                <input type="number" id="amount" value={amount} onChange={(e) => setAmount(e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm" required />
-              </div>
-              <div className="mb-4">
-                <label htmlFor="account" className="block text-sm font-medium text-gray-700">Conta</label>
-                <select id="account" value={accountId} onChange={(e) => setAccountId(e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm" required>
-                  <option value="">Selecione uma Conta</option>
-                  {accounts.map((acc) => (
-                    <option key={acc.account_id} value={acc.account_id}>{acc.account_name}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="mb-4">
-                <label htmlFor="category" className="block text-sm font-medium text-gray-700">Categoria</label>
-                <select id="category" value={categoryId} onChange={(e) => setCategoryId(e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm">
-                  <option value="">Sem Categoria</option>
-                  {categories.map((c) => (
-                    <option key={c.category_id} value={c.category_id}>{c.category_name}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="mb-6">
-                <label htmlFor="type" className="block text-sm font-medium text-gray-700">Tipo</label>
-                <select id="type" value={type} onChange={(e) => setType(e.target.value as any)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm">
-                  <option value="expense">Despesa</option>
-                  <option value="income">Receita</option>
-                </select>
-              </div>
-              <button type="submit" className="w-full rounded-md bg-indigo-600 py-2 text-white hover:bg-indigo-700">Adicionar Transação</button>
-            </form>
+            ) : (
+              workspaceId && <TransferForm accounts={accounts} workspaceId={workspaceId} onTransferSuccess={fetchData} />
+            )}
           </div>
 
         {/* Right Column */}
