@@ -1,11 +1,7 @@
 import { Request, Response } from 'express';
 import * as transactionService from '../services/transaction.service';
 
-interface AuthenticatedRequest extends Request {
-  user?: { userId: string; email: string };
-}
-
-export const createTransaction = async (req: AuthenticatedRequest, res: Response) => {
+export const createTransaction = async (req: Request, res: Response) => {
     try {
         const userId = req.user?.userId;
         if (!userId) {
@@ -21,7 +17,7 @@ export const createTransaction = async (req: AuthenticatedRequest, res: Response
     }
 };
 
-export const getTransactions = async (req: AuthenticatedRequest, res: Response) => {
+export const getTransactions = async (req: Request, res: Response) => {
     try {
         const userId = req.user?.userId;
         const { workspaceId } = req.query;
@@ -43,7 +39,7 @@ export const getTransactions = async (req: AuthenticatedRequest, res: Response) 
     }
 };
 
-export const updateTransaction = async (req: AuthenticatedRequest, res: Response) => {
+export const updateTransaction = async (req: Request, res: Response) => {
     try {
         const userId = req.user?.userId;
         const { id } = req.params;
@@ -65,7 +61,7 @@ export const updateTransaction = async (req: AuthenticatedRequest, res: Response
     }
 };
 
-export const deleteTransaction = async (req: AuthenticatedRequest, res: Response) => {
+export const deleteTransaction = async (req: Request, res: Response) => {
     try {
         const userId = req.user?.userId;
         const { id } = req.params;

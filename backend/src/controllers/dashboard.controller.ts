@@ -1,11 +1,7 @@
 import { Request, Response } from 'express';
 import * as dashboardService from '../services/dashboard.service';
 
-interface AuthenticatedRequest extends Request {
-  user?: { userId: string; email: string };
-}
-
-export const getDashboardSummary = async (req: AuthenticatedRequest, res: Response) => {
+export const getDashboardSummary = async (req: Request, res: Response) => {
   try {
     const userId = req.user?.userId;
     const { workspaceId, month, year } = req.query;

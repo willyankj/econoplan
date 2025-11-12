@@ -1,11 +1,9 @@
 import { Request, Response } from 'express';
 import * as categoryService from '../services/category.service';
 
-interface AuthenticatedRequest extends Request {
-  user?: { userId: string; email: string };
-}
+// No longer need a custom interface as we augmented the global Express Request type
 
-export const createCategory = async (req: AuthenticatedRequest, res: Response) => {
+export const createCategory = async (req: Request, res: Response) => {
     try {
         const userId = req.user?.userId;
         if (!userId) {
@@ -21,7 +19,7 @@ export const createCategory = async (req: AuthenticatedRequest, res: Response) =
     }
 };
 
-export const getCategories = async (req: AuthenticatedRequest, res: Response) => {
+export const getCategories = async (req: Request, res: Response) => {
     try {
         const userId = req.user?.userId;
         const { workspaceId } = req.query;
@@ -43,7 +41,7 @@ export const getCategories = async (req: AuthenticatedRequest, res: Response) =>
     }
 };
 
-export const updateCategory = async (req: AuthenticatedRequest, res: Response) => {
+export const updateCategory = async (req: Request, res: Response) => {
     try {
         const userId = req.user?.userId;
         const { id } = req.params;
@@ -65,7 +63,7 @@ export const updateCategory = async (req: AuthenticatedRequest, res: Response) =
     }
 };
 
-export const deleteCategory = async (req: AuthenticatedRequest, res: Response) => {
+export const deleteCategory = async (req: Request, res: Response) => {
     try {
         const userId = req.user?.userId;
         const { id } = req.params;
