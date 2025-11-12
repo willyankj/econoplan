@@ -18,6 +18,7 @@ export default function Home() {
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [summary, setSummary] = useState({ totalIncome: 0, totalExpense: 0, balance: 0 });
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
   const [type, setType] = useState<'income' | 'expense'>('expense');
@@ -66,13 +67,19 @@ export default function Home() {
 
     const fetchData = async () => {
       if (!id) return;
+      const date = new Date();
+      const month = date.getMonth() + 1;
+      const year = date.getFullYear();
+
       try {
-        const [transactionsRes, categoriesRes] = await Promise.all([
+        const [transactionsRes, categoriesRes, summaryRes] = await Promise.all([
           api.get(`/transactions?workspaceId=${id}`),
-          api.get(`/categories?workspaceId=${id}`)
+          api.get(`/categories?workspaceId=${id}`),
+          api.get(`/dashboard/summary?workspaceId=${id}&month=${month}&year=${year}`)
         ]);
         setTransactions(transactionsRes.data);
         setCategories(categoriesRes.data);
+        setSummary(summaryRes.data);
       } catch (error) {
         console.error('Failed to fetch data', error);
       }
@@ -114,6 +121,22 @@ export default function Home() {
           >
             Logout
           </button>
+        </div>
+
+        {/* Summary Cards */}
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-3 mb-8">
+          <div className="bg-green-100 p-6 rounded-lg shadow">
+            <h3 className="text-sm font-medium text-green-800">Total Income</h3>
+            <p className="text-2xl font-semibold text-green-900">R$ {summary.totalIncome.toFixed(2)}</p>
+          </div>
+          <div className="bg-red-100 p-6 rounded-lg shadow">
+            <h3 className="text-sm font-medium text-red-800">Total Expense</h3>
+            <p className="text-2xl font-semibold text-red-900">R$ {summary.totalExpense.toFixed(2)}</p>
+          </div>
+          <div className="bg-blue-100 p-6 rounded-lg shadow">
+            <h3 className="text-sm font-medium text-blue-800">Balance</h3>
+            <p className="text-2xl font-semibold text-blue-900">R$ {summary.balance.toFixed(2)}</p>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
