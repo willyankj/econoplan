@@ -35,12 +35,12 @@ export default function Home() {
   };
 
   const handleDeleteTransaction = async (transactionId: string) => {
-    if (window.confirm('Are you sure you want to delete this transaction?')) {
+    if (window.confirm('Você tem certeza que deseja excluir esta transação?')) {
       try {
         await api.delete(`/transactions/${transactionId}`);
-        setTransactions(transactions.filter((t) => t.transaction_id !== transactionId));
+        fetchData(); // Refetch all data
       } catch (error) {
-        console.error('Failed to delete transaction', error);
+        console.error('Falha ao excluir a transação', error);
       }
     }
   };
@@ -55,36 +55,35 @@ export default function Home() {
     setIsModalOpen(false);
   };
 
+  const fetchData = async () => {
+    const id = localStorage.getItem('workspaceId');
+    if (!id) return;
+    const date = new Date();
+    const month = date.getMonth() + 1;
+    const year = date.getFullYear();
+    const timestamp = new Date().getTime(); // Cache-busting parameter
+
+    try {
+      const [transactionsRes, categoriesRes, summaryRes] = await Promise.all([
+        api.get(`/transactions?workspaceId=${id}&_=${timestamp}`),
+        api.get(`/categories?workspaceId=${id}&_=${timestamp}`),
+        api.get(`/dashboard/summary?workspaceId=${id}&month=${month}&year=${year}&_=${timestamp}`)
+      ]);
+      setTransactions(transactionsRes.data);
+      setCategories(categoriesRes.data);
+      setSummary(summaryRes.data);
+    } catch (error) {
+      console.error('Falha ao buscar dados', error);
+    }
+  };
+
   const handleUpdateTransaction = (updatedTransaction: Transaction) => {
-    setTransactions(transactions.map((t) =>
-      t.transaction_id === updatedTransaction.transaction_id ? updatedTransaction : t
-    ));
+    fetchData(); // Refetch all data
   };
 
   useEffect(() => {
     const id = localStorage.getItem('workspaceId');
     setWorkspaceId(id);
-
-    const fetchData = async () => {
-      if (!id) return;
-      const date = new Date();
-      const month = date.getMonth() + 1;
-      const year = date.getFullYear();
-
-      try {
-        const [transactionsRes, categoriesRes, summaryRes] = await Promise.all([
-          api.get(`/transactions?workspaceId=${id}`),
-          api.get(`/categories?workspaceId=${id}`),
-          api.get(`/dashboard/summary?workspaceId=${id}&month=${month}&year=${year}`)
-        ]);
-        setTransactions(transactionsRes.data);
-        setCategories(categoriesRes.data);
-        setSummary(summaryRes.data);
-      } catch (error) {
-        console.error('Failed to fetch data', error);
-      }
-    };
-
     fetchData();
   }, []);
 
@@ -100,8 +99,8 @@ export default function Home() {
         category_id: categoryId || null,
         transaction_date: new Date().toISOString().split('T')[0], // YYYY-MM-DD
       };
-      const response = await api.post('/transactions', newTransaction);
-      setTransactions([response.data, ...transactions]);
+      await api.post('/transactions', newTransaction);
+      fetchData(); // Refetch all data
       // Clear form
       setDescription('');
       setAmount('');
@@ -114,27 +113,27 @@ export default function Home() {
     <AuthGuard>
       <main className="container mx-auto p-8">
         <div className="flex items-center justify-between mb-8">
-          <h1 className="text-4xl font-bold">Dashboard</h1>
+          <h1 className="text-4xl font-bold">Painel</h1>
           <button
             onClick={handleLogout}
             className="rounded-md bg-red-600 py-2 px-4 text-sm font-semibold text-white shadow-sm hover:bg-red-700"
           >
-            Logout
+            Sair
           </button>
         </div>
 
         {/* Summary Cards */}
         <div className="grid grid-cols-1 gap-6 md:grid-cols-3 mb-8">
           <div className="bg-green-100 p-6 rounded-lg shadow">
-            <h3 className="text-sm font-medium text-green-800">Total Income</h3>
+            <h3 className="text-sm font-medium text-green-800">Receita Total</h3>
             <p className="text-2xl font-semibold text-green-900">R$ {summary.totalIncome.toFixed(2)}</p>
           </div>
           <div className="bg-red-100 p-6 rounded-lg shadow">
-            <h3 className="text-sm font-medium text-red-800">Total Expense</h3>
+            <h3 className="text-sm font-medium text-red-800">Despesa Total</h3>
             <p className="text-2xl font-semibold text-red-900">R$ {summary.totalExpense.toFixed(2)}</p>
           </div>
           <div className="bg-blue-100 p-6 rounded-lg shadow">
-            <h3 className="text-sm font-medium text-blue-800">Balance</h3>
+            <h3 className="text-sm font-medium text-blue-800">Saldo</h3>
             <p className="text-2xl font-semibold text-blue-900">R$ {summary.balance.toFixed(2)}</p>
           </div>
         </div>
@@ -142,33 +141,33 @@ export default function Home() {
         <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
           {/* Form Section */}
           <div className="md:col-span-1">
-            <h2 className="mb-4 text-2xl font-semibold">New Transaction</h2>
+            <h2 className="mb-4 text-2xl font-semibold">Nova Transação</h2>
             <form onSubmit={handleSubmit} className="rounded-lg bg-white p-6 shadow-md">
               <div className="mb-4">
-                <label htmlFor="description" className="block text-sm font-medium text-gray-700">Description</label>
+                <label htmlFor="description" className="block text-sm font-medium text-gray-700">Descrição</label>
                 <input type="text" id="description" value={description} onChange={(e) => setDescription(e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm" required />
               </div>
               <div className="mb-4">
-                <label htmlFor="amount" className="block text-sm font-medium text-gray-700">Amount</label>
+                <label htmlFor="amount" className="block text-sm font-medium text-gray-700">Valor</label>
                 <input type="number" id="amount" value={amount} onChange={(e) => setAmount(e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm" required />
               </div>
               <div className="mb-4">
-                <label htmlFor="category" className="block text-sm font-medium text-gray-700">Category</label>
+                <label htmlFor="category" className="block text-sm font-medium text-gray-700">Categoria</label>
                 <select id="category" value={categoryId} onChange={(e) => setCategoryId(e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm">
-                  <option value="">No Category</option>
+                  <option value="">Sem Categoria</option>
                   {categories.map((c) => (
                     <option key={c.category_id} value={c.category_id}>{c.category_name}</option>
                   ))}
                 </select>
               </div>
               <div className="mb-6">
-                <label htmlFor="type" className="block text-sm font-medium text-gray-700">Type</label>
+                <label htmlFor="type" className="block text-sm font-medium text-gray-700">Tipo</label>
                 <select id="type" value={type} onChange={(e) => setType(e.target.value as any)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm">
-                  <option value="expense">Expense</option>
-                  <option value="income">Income</option>
+                  <option value="expense">Despesa</option>
+                  <option value="income">Receita</option>
                 </select>
               </div>
-              <button type="submit" className="w-full rounded-md bg-indigo-600 py-2 text-white hover:bg-indigo-700">Add Transaction</button>
+              <button type="submit" className="w-full rounded-md bg-indigo-600 py-2 text-white hover:bg-indigo-700">Adicionar Transação</button>
             </form>
           </div>
 
@@ -176,7 +175,7 @@ export default function Home() {
         <div className="md:col-span-2 space-y-8">
           {/* Transactions List Section */}
           <div>
-            <h2 className="mb-4 text-2xl font-semibold">Recent Transactions</h2>
+            <h2 className="mb-4 text-2xl font-semibold">Transações Recentes</h2>
             <div className="rounded-lg bg-white p-6 shadow-md">
               <ul className="space-y-3">
                 {transactions.map((t) => (

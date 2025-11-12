@@ -54,7 +54,7 @@ export default function EditTransactionModal({ isOpen, transaction, categories, 
       onUpdate(response.data);
       onClose();
     } catch (error) {
-      console.error('Failed to update transaction', error);
+      console.error('Falha ao atualizar a transação', error);
       // Optionally, show an error message
     }
   };
@@ -62,35 +62,35 @@ export default function EditTransactionModal({ isOpen, transaction, categories, 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
       <div className="w-full max-w-md rounded-lg bg-white p-8 shadow-xl">
-        <h2 className="mb-6 text-2xl font-bold">Edit Transaction</h2>
+        <h2 className="mb-6 text-2xl font-bold">Editar Transação</h2>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label htmlFor="edit-description" className="block text-sm font-medium">Description</label>
+            <label htmlFor="edit-description" className="block text-sm font-medium">Descrição</label>
             <input id="edit-description" type="text" value={description} onChange={(e) => setDescription(e.target.value)} className="mt-1 w-full rounded border p-2" required />
           </div>
           <div>
-            <label htmlFor="edit-amount" className="block text-sm font-medium">Amount</label>
+            <label htmlFor="edit-amount" className="block text-sm font-medium">Valor</label>
             <input id="edit-amount" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} className="mt-1 w-full rounded border p-2" required />
           </div>
           <div>
-            <label htmlFor="edit-category" className="block text-sm font-medium">Category</label>
+            <label htmlFor="edit-category" className="block text-sm font-medium">Categoria</label>
             <select id="edit-category" value={categoryId} onChange={(e) => setCategoryId(e.target.value)} className="mt-1 w-full rounded border p-2">
-              <option value="">No Category</option>
+              <option value="">Sem Categoria</option>
               {categories.map((c) => (
                 <option key={c.category_id} value={c.category_id}>{c.category_name}</option>
               ))}
             </select>
           </div>
           <div>
-            <label htmlFor="edit-type" className="block text-sm font-medium">Type</label>
+            <label htmlFor="edit-type" className="block text-sm font-medium">Tipo</label>
             <select id="edit-type" value={type} onChange={(e) => setType(e.target.value as any)} className="mt-1 w-full rounded border p-2">
-              <option value="expense">Expense</option>
-              <option value="income">Income</option>
+              <option value="expense">Despesa</option>
+              <option value="income">Receita</option>
             </select>
           </div>
           <div className="mt-6 flex justify-end gap-4">
-            <button type="button" onClick={onClose} className="rounded bg-gray-300 py-2 px-4 hover:bg-gray-400">Cancel</button>
-            <button type="submit" className="rounded bg-indigo-600 py-2 px-4 text-white hover:bg-indigo-700">Update</button>
+            <button type="button" onClick={onClose} className="rounded bg-gray-300 py-2 px-4 hover:bg-gray-400">Cancelar</button>
+            <button type="submit" className="rounded bg-indigo-600 py-2 px-4 text-white hover:bg-indigo-700">Atualizar</button>
           </div>
         </form>
       </div>

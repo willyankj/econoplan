@@ -1,23 +1,10 @@
 import pool from '../database/database';
+import { canAccessWorkspace } from '../utils/workspace.util';
 
 interface CategoryData {
   workspace_id: string;
   category_name: string;
 }
-
-// This function is duplicated in transaction.service.ts. We should refactor it to a shared utils file later.
-const canAccessWorkspace = async (userId: string, workspaceId: string): Promise<boolean> => {
-    const client = await pool.connect();
-    try {
-        const result = await client.query(
-            'SELECT 1 FROM user_workspaces WHERE user_id = $1 AND workspace_id = $2',
-            [userId, workspaceId]
-        );
-        return result.rowCount > 0;
-    } finally {
-        client.release();
-    }
-};
 
 export const createCategory = async (userId: string, data: CategoryData) => {
     if (!await canAccessWorkspace(userId, data.workspace_id)) {

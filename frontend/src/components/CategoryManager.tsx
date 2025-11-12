@@ -36,7 +36,7 @@ export default function CategoryManager({ categories, workspaceId, onCategoryCre
 
   return (
     <div>
-      <h2 className="mb-4 text-2xl font-semibold">Manage Categories</h2>
+      <h2 className="mb-4 text-2xl font-semibold">Gerenciar Categorias</h2>
       <div className="rounded-lg bg-white p-6 shadow-md">
         {/* Form to add new category */}
         <form onSubmit={handleCreateCategory} className="mb-4 flex gap-2">
@@ -44,11 +44,11 @@ export default function CategoryManager({ categories, workspaceId, onCategoryCre
             type="text"
             value={newCategoryName}
             onChange={(e) => setNewCategoryName(e.target.value)}
-            placeholder="New category name"
+            placeholder="Nome da nova categoria"
             className="flex-grow rounded-md border-gray-300 shadow-sm"
           />
           <button type="submit" className="rounded-md bg-blue-600 py-2 px-4 text-white hover:bg-blue-700">
-            Add
+            Adicionar
           </button>
         </form>
 

@@ -21,7 +21,7 @@ export default function RegisterPage() {
       if (err.response && err.response.data && err.response.data.message) {
         setError(err.response.data.message);
       } else {
-        setError('An unexpected error occurred. Please try again.');
+        setError('Ocorreu um erro inesperado. Por favor, tente novamente.');
       }
       console.error(err);
     }
@@ -30,11 +30,11 @@ export default function RegisterPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-100">
       <div className="w-full max-w-md rounded-lg bg-white p-8 shadow-md">
-        <h2 className="mb-6 text-center text-3xl font-bold text-gray-800">Create your Econoplan Account</h2>
+        <h2 className="mb-6 text-center text-3xl font-bold text-gray-800">Crie sua Conta no Econoplan</h2>
         <form onSubmit={handleSubmit}>
           <div className="mb-4">
             <label htmlFor="email" className="block text-sm font-medium text-gray-700">
-              Email Address
+              Endereço de E-mail
             </label>
             <input
               type="email"
@@ -47,7 +47,7 @@ export default function RegisterPage() {
           </div>
           <div className="mb-6">
             <label htmlFor="password" className="block text-sm font-medium text-gray-700">
-              Password
+              Senha
             </label>
             <input
               type="password"
@@ -62,13 +62,13 @@ export default function RegisterPage() {
             type="submit"
             className="w-full rounded-md bg-indigo-600 py-2 px-4 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
           >
-            Create Account
+            Criar Conta
           </button>
         </form>
         <p className="mt-4 text-center text-sm text-gray-600">
-          Already have an account?{' '}
+          Já tem uma conta?{' '}
           <Link href="/login" className="font-medium text-indigo-600 hover:text-indigo-500">
-            Sign in
+            Entrar
           </Link>
         </p>
       </div>

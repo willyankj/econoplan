@@ -1,18 +1,5 @@
 import pool from '../database/database';
-
-// This function is duplicated across services. Refactor later.
-const canAccessWorkspace = async (userId: string, workspaceId: string): Promise<boolean> => {
-    const client = await pool.connect();
-    try {
-        const result = await client.query(
-            'SELECT 1 FROM user_workspaces WHERE user_id = $1 AND workspace_id = $2',
-            [userId, workspaceId]
-        );
-        return result.rowCount > 0;
-    } finally {
-        client.release();
-    }
-};
+import { canAccessWorkspace } from '../utils/workspace.util';
 
 export const getSummary = async (userId: string, workspaceId: string, month: number, year: number) => {
     if (!await canAccessWorkspace(userId, workspaceId)) {
