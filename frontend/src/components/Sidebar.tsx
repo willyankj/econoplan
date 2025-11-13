@@ -12,11 +12,9 @@ interface NavItemProps {
 }
 
 const NavItem: React.FC<NavItemProps> = ({ icon: Icon, label, href }) => (
-  <Link href={href}>
-    <a className="flex items-center px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-md">
-      <Icon className="w-5 h-5 mr-3" />
-      <span className="font-medium">{label}</span>
-    </a>
+  <Link href={href} className="flex items-center px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-md">
+    <Icon className="w-5 h-5 mr-3" />
+    <span className="font-medium">{label}</span>
   </Link>
 );
 
