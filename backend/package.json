@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node dist/index.js",
     "build": "tsc",
-    "dev": "ts-node-dev --respawn --transpile-only --ignore-watch node_modules src/index.ts"
+    "dev": "ts-node-dev --respawn --transpile-only --ignore-watch node_modules src/index.ts",
+    "migrate:create": "node-pg-migrate create --dir src/database/migrations --migration-file-language ts",
+    "migrate:up": "node-pg-migrate --tsconfig tsconfig.json --dir src/database/migrations up"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",
@@ -15,20 +17,21 @@
     "express": "^4.18.2",
     "express-rate-limit": "^7.1.5",
     "express-validator": "^7.0.1",
+    "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.11.3",
-    "uuid": "^9.0.1",
-    "helmet": "^7.1.0"
+    "uuid": "^9.0.1"
   },
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
-    "@types/jsonwebtoken": "^9.0.5",
     "@types/helmet": "^4.0.0",
+    "@types/jsonwebtoken": "^9.0.5",
     "@types/node": "^20.10.4",
     "@types/pg": "^8.10.9",
     "@types/uuid": "^9.0.7",
+    "node-pg-migrate": "^8.0.3",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.3.3"
   }

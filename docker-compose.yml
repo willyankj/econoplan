@@ -11,7 +11,6 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./backend/src/database/schema.sql:/docker-entrypoint-initdb.d/init.sql
     ports:
       - "${DB_PORT}:5432"
     healthcheck:
@@ -36,7 +35,9 @@ services:
       PORT: ${API_PORT}
     ports:
       - "${API_PORT}:${API_PORT}"
-    command: npm run dev
+    command: >
+      sh -c "npm run migrate:up &&
+             npm run dev"
 
   frontend:
     build:
