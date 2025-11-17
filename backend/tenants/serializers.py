@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from users.serializers import CustomUserDetailsSerializer
-from .models import Tenant, Workspace, WorkspaceMembership
+from .models import Tenant, Workspace, WorkspaceMembership, Category, Goal, Transaction
 
 class WorkspaceMembershipSerializer(serializers.ModelSerializer):
     """
@@ -49,3 +49,32 @@ class TenantSerializer(serializers.ModelSerializer):
     class Meta:
         model = Tenant
         fields = ['id', 'name', 'owner', 'workspaces']
+
+
+class CategorySerializer(serializers.ModelSerializer):
+    """Serializer for the Category model."""
+    class Meta:
+        model = Category
+        fields = ['id', 'name', 'workspace']
+        read_only_fields = ['workspace']
+
+
+class GoalSerializer(serializers.ModelSerializer):
+    """Serializer for the Goal model."""
+    class Meta:
+        model = Goal
+        fields = ['id', 'name', 'workspace', 'target_amount', 'current_amount']
+        read_only_fields = ['workspace']
+
+
+class TransactionSerializer(serializers.ModelSerializer):
+    """Serializer for the Transaction model."""
+    user = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    class Meta:
+        model = Transaction
+        fields = [
+            'id', 'workspace', 'category', 'user', 'goal', 'amount', 'type',
+            'date', 'description'
+        ]
+        read_only_fields = ['workspace']

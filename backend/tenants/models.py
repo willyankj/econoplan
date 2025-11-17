@@ -60,3 +60,51 @@ class WorkspaceMembership(models.Model):
 
     def __str__(self):
         return f"{self.user.email} in {self.workspace.name} ({self.role})"
+
+# Categoria para transações (Ex: "Comida", "Transporte")
+class Category(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=100)
+    workspace = models.ForeignKey(Workspace, on_delete=models.CASCADE, related_name='categories')
+
+    class Meta:
+        verbose_name_plural = "Categories"
+
+    def __str__(self):
+        return self.name
+
+# Meta financeira (Ex: "Nossa Viagem")
+class Goal(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=100)
+    workspace = models.ForeignKey(Workspace, on_delete=models.CASCADE, related_name='goals')
+    target_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    current_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+
+    def __str__(self):
+        return self.name
+
+# Transação financeira
+class Transaction(models.Model):
+    TYPE_CHOICES = (
+        ('expense', 'Despesa'),
+        ('income', 'Receita'),
+    )
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    workspace = models.ForeignKey(Workspace, on_delete=models.CASCADE, related_name='transactions')
+    category = models.ForeignKey(Category, on_delete=models.SET_NULL, null=True, related_name='transactions')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='transactions')
+    goal = models.ForeignKey(
+        Goal,
+        on_delete=models.SET_NULL, # Se a meta for apagada, a transação não é
+        null=True,                 # Opcional
+        blank=True                 # Opcional
+    )
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    type = models.CharField(max_length=7, choices=TYPE_CHOICES)
+    date = models.DateField()
+    description = models.CharField(max_length=255, blank=True)
+
+    def __str__(self):
+        return f"{self.type} - {self.amount} on {self.date}"
