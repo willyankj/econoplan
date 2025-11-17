@@ -4,11 +4,11 @@ FROM node:20-alpine
 # Definir o diretório de trabalho no container
 WORKDIR /app
 
-# Copiar o package.json e o package-lock.json para o diretório de trabalho
-COPY package.json package-lock.json ./
+# Copiar o package.json para o diretório de trabalho
+COPY package.json ./
 
-# Instalar as dependências do projeto
-# (O --frozen-lockfile é uma boa prática para CI/CD, mas o install simples funciona)
+# Instalar as dependências do projeto.
+# Isto irá gerar o package-lock.json no container
 RUN npm install
 
 # Copiar o resto dos arquivos do projeto para o diretório de trabalho
