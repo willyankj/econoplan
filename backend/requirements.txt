@@ -1,0 +1,9 @@
+django
+djangorestframework
+gunicorn
+psycopg2-binary
+django-cors-headers
+django-allauth
+dj-rest-auth
+djangorestframework-simplejwt
+drf-nested-routers
