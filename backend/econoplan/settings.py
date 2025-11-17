@@ -133,6 +133,7 @@ ACCOUNT_EMAIL_VERIFICATION = 'optional'
 
 # 3. Configurações do dj-rest-auth (para emitir JWT)
 REST_USE_JWT = True
+TOKEN_MODEL = None # Desativa o modelo de token padrão do DRF
 JWT_AUTH_COOKIE = 'econoplan-auth-cookie'
 JWT_AUTH_REFRESH_COOKIE = 'econoplan-refresh-cookie'
 
