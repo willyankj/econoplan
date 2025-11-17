@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     host: '0.0.0.0', // Allow access from outside the container
-    port: 3000,
+    port: 5173,
     proxy: {
       '/api': {
         target: 'http://backend:8000',
