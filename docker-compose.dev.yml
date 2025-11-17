@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: econoplan_db_dev
+    volumes:
+      - postgres_data_dev:/var/lib/postgresql/data/
+    environment:
+      - POSTGRES_USER=econoplan
+      - POSTGRES_PASSWORD=senha_super_secreta_mude_isso
+      - POSTGRES_DB=econoplan_db
+    networks:
+      - econoplan_network
+
+  backend:
+    build: ./backend
+    container_name: econoplan_backend_dev
+    volumes:
+      - ./backend:/app
+    expose:
+      - 8000
+    environment:
+      - POSTGRES_USER=econoplan
+      - POSTGRES_PASSWORD=senha_super_secreta_mude_isso
+      - POSTGRES_DB=econoplan_db
+      - POSTGRES_HOST=db
+      - DJANGO_SECRET_KEY=sua_chave_secreta_do_django_aqui
+      - DJANGO_DEBUG=True
+    command: python manage.py runserver 0.0.0.0:8000
+    depends_on:
+      - db
+    networks:
+      - econoplan_network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: econoplan_frontend_dev
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "80:3000"
+    networks:
+      - econoplan_network
+
+networks:
+  econoplan_network:
+    driver: bridge
+
+volumes:
+  postgres_data_dev:
