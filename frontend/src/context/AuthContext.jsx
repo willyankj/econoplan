@@ -34,7 +34,7 @@ export const AuthProvider = ({ children }) => {
 
   const registerUser = async (email, password, password2) => {
     try {
-      const response = await api.post('/auth/register/', { email, password, password2 });
+      const response = await api.post('/auth/registration/', { email, password, password2 });
       if (response.status === 201) {
         // Automatically log in the user after successful registration
         await loginUser(email, password);
