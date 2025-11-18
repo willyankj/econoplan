@@ -7,3 +7,7 @@ django-allauth
 dj-rest-auth
 djangorestframework-simplejwt
 drf-nested-routers
+requests
+requests-oauthlib
+pyjwt
+cryptography

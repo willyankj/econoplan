@@ -90,36 +90,26 @@ Este é o ambiente que simula a produção, focado em **performance e otimizaç�
 
 ### 1. Ambiente de Desenvolvimento (Recomendado)
 
-Este ambiente ativa o hot-reloading para backend e frontend.
+Este ambiente usa o proxy do Vite para hot-reloading e redirecionamento de API.
 
-**1. Clone o Repositório**
-```bash
-git clone [https://github.com/willyankj/econoplan.git](https://github.com/willyankj/econoplan.git)
-cd econoplan
-```
-
-**2. Suba os Containers (Dev)**
-Este comando usa o arquivo de produção como base e o sobrescreve com as configurações de desenvolvimento.
+**1. Subir o Ambiente (Build Limpo):**
+Para garantir que as alterações de código (especialmente no backend) sejam carregadas, use sempre o build sem cache na primeira vez ou após mudanças no `requirements.txt`:
 
 ```bash
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d
+docker compose -f docker-compose.dev.yml build --no-cache
+docker compose -f docker-compose.dev.yml up -d
 ```
 
-* O frontend (React) estará acessível em: `http://localhost`
-* A API (Django) estará acessível em: `http://localhost/api/`
-* O Admin do Django estará em: `http://localhost/admin/`
-
-**3. Execute as Migrações Iniciais (Primeira vez)**
-Em um terminal separado, execute as migrações do Django:
+**2. Executar Migrações:** Sempre que iniciar o banco de dados do zero:
 
 ```bash
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec backend python manage.py migrate
+docker compose -f docker-compose.dev.yml exec backend python manage.py migrate
 ```
 
-**4. Para Parar o Ambiente**
-```bash
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml down
-```
+**3. Acessar o Projeto:**
+
+Frontend: http://localhost (Mapeado para a porta 3000 do Vite)
+API: http://localhost/api/
 
 ---
 
