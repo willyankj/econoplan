@@ -12,6 +12,16 @@ DEBUG = os.environ.get('DJANGO_DEBUG', 'True') == 'True'
 
 ALLOWED_HOSTS = []
 
+# --- Custom Settings for EconoPlan ---
+
+# Configurações do dj-rest-auth (para emitir JWT)
+# Estas configurações precisam de ser carregadas ANTES de 'dj_rest_auth' ser listado em INSTALLED_APPS
+# para evitar o erro 'ImproperlyConfigured'.
+REST_USE_JWT = True
+TOKEN_MODEL = None # Desativa o modelo de token padrão do DRF
+JWT_AUTH_COOKIE = 'econoplan-auth-cookie'
+JWT_AUTH_REFRESH_COOKIE = 'econoplan-refresh-cookie'
+
 # Application definition
 
 INSTALLED_APPS = [
@@ -130,11 +140,6 @@ ACCOUNT_EMAIL_REQUIRED = True
 ACCOUNT_UNIQUE_EMAIL = True
 ACCOUNT_USERNAME_REQUIRED = False
 ACCOUNT_EMAIL_VERIFICATION = 'optional'
-
-# 3. Configurações do dj-rest-auth (para emitir JWT)
-REST_USE_JWT = True
-JWT_AUTH_COOKIE = 'econoplan-auth-cookie'
-JWT_AUTH_REFRESH_COOKIE = 'econoplan-refresh-cookie'
 
 # 4. Configurar o dj-rest-auth para usar os Serializers de UUID
 REST_AUTH_SERIALIZERS = {
