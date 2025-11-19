@@ -1,0 +1,221 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// -------------------------------------------------
+// Core Models (Tenant, Workspace, User)
+// -------------------------------------------------
+
+model Tenant {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users      User[]
+  workspaces Workspace[]
+}
+
+model Workspace {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  members      WorkspaceMember[]
+  bankAccounts BankAccount[]
+  transactions Transaction[]
+  categories   Category[]
+  budgets      Budget[]
+
+  @@index([tenantId])
+}
+
+model User {
+  id            String    @id @default(uuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  password      String?
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  accounts      Account[] // NextAuth Account model
+  sessions      Session[]
+  workspaces    WorkspaceMember[]
+}
+
+model WorkspaceMember {
+  id String @id @default(uuid())
+
+  userId      String
+  workspaceId String
+  role        WorkspaceRole @default(MEMBER)
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, workspaceId])
+  @@index([userId])
+  @@index([workspaceId])
+}
+
+enum WorkspaceRole {
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+
+// -------------------------------------------------
+// NextAuth.js Models
+// -------------------------------------------------
+
+model Account {
+  id                String  @id @default(uuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// -------------------------------------------------
+// Financial Models
+// -------------------------------------------------
+
+model BankAccount {
+  id        String   @id @default(uuid())
+  name      String   // e.g., "Main Checking Account"
+  bank      String   // e.g., "Nubank"
+  balance   Decimal  @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  transactions Transaction[]
+
+  @@index([workspaceId])
+}
+
+
+model Category {
+  id        String   @id @default(uuid())
+  name      String
+  type      TransactionType
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  parentId  String?
+  parent    Category?  @relation("SubCategories", fields: [parentId], references: [id], onDelete: SetNull)
+  children  Category[] @relation("SubCategories")
+
+  transactions Transaction[]
+  budgets      Budget[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId])
+  @@index([parentId])
+}
+
+
+model Transaction {
+  id          String          @id @default(uuid())
+  description String
+  amount      Decimal
+  date        DateTime
+  type        TransactionType
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  bankAccountId String
+  bankAccount   BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Restrict)
+
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+
+  @@index([workspaceId])
+  @@index([bankAccountId])
+  @@index([categoryId])
+}
+
+model Budget {
+  id             String   @id @default(uuid())
+  amount         Decimal
+  startDate      DateTime
+  endDate        DateTime
+  alertThreshold Float?   @default(0.8) // e.g., 0.8 for 80%
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  categoryId String?   // Null for a global workspace budget
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+
+  @@index([workspaceId])
+  @@index([categoryId])
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+}
