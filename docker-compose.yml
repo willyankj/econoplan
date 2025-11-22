@@ -1,0 +1,19 @@
+services:
+  db:
+    container_name: econoplan-db
+    image: postgres:15-alpine
+    restart: always
+    ports:
+      # IMPORTANTE: Mantendo blindado apenas para localhost
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_PASSWORD: "W23f05spfc123@"
+      POSTGRES_DB: "econoplan"
+    volumes:
+      # Conecta ao volume que já existe
+      - econoplan_data:/var/lib/postgresql/data
+
+# Aqui dizemos ao Docker: "Use o volume que já existe, não crie um novo"
+volumes:
+  econoplan_data:
+    external: true

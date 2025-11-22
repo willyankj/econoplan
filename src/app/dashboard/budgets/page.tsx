@@ -1,12 +1,10 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { redirect } from "next/navigation";
 import { NewBudgetModal } from "@/components/dashboard/budgets/new-budget-modal";
 import { BudgetCard } from "@/components/dashboard/budgets/budget-card";
 import { PieChart, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
+import { getUserWorkspace } from "@/lib/get-user-workspace"; // Importante
 
 export const dynamic = 'force-dynamic';
 
@@ -15,17 +13,11 @@ export default async function BudgetsPage({
 }: {
   searchParams: Promise<{ month?: string }>
 }) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) redirect("/login");
+  // CORREÇÃO: Workspace ativo
+  const { workspaceId } = await getUserWorkspace();
+  if (!workspaceId) return <div>Selecione um workspace</div>;
 
   const params = await searchParams;
-  const user = await prisma.user.findUnique({
-    where: { email: session.user.email },
-    include: { workspaces: true }
-  });
-
-  if (!user || user.workspaces.length === 0) return <div>Sem workspace</div>;
-  const workspaceId = user.workspaces[0].workspaceId;
 
   // Lógica de Mês
   const now = new Date();

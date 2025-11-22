@@ -1,5 +1,3 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
 import { 
@@ -15,6 +13,7 @@ import { TransactionFilterButton } from "./filter-button";
 import { SearchInput } from "./search-input";
 import { ExportButton } from "./export-button";
 import { BankLogo } from "@/components/ui/bank-logo";
+import { getUserWorkspace } from "@/lib/get-user-workspace"; // Importante
 
 export const dynamic = 'force-dynamic';
 
@@ -23,17 +22,11 @@ export default async function TransactionsPage({
 }: {
   searchParams: Promise<{ type?: string, q?: string, cardId?: string, accountId?: string, from?: string, to?: string }>
 }) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) redirect("/login");
+  // CORREÇÃO: Usa o workspace ativo
+  const { workspaceId, user } = await getUserWorkspace();
+  if (!workspaceId || !user) redirect("/login");
 
   const params = await searchParams;
-  const user = await prisma.user.findUnique({
-    where: { email: session.user.email },
-    include: { workspaces: true }
-  });
-
-  if (!user || user.workspaces.length === 0) return <div>Sem workspace</div>;
-  const workspaceId = user.workspaces[0].workspaceId;
 
   // 1. BUSCA DADOS
   const rawAccounts = await prisma.bankAccount.findMany({ where: { workspaceId }, orderBy: { name: 'asc' } });
@@ -42,7 +35,8 @@ export default async function TransactionsPage({
   const rawCards = await prisma.creditCard.findMany({ where: { workspaceId }, orderBy: { name: 'asc' } });
   const cards = rawCards.map(c => ({ ...c, limit: Number(c.limit) }));
 
-  // ... (Lógica de Filtros Mantida Igual) ...
+  const categories = await prisma.category.findMany({ where: { workspaceId }, orderBy: { name: 'asc' } });
+
   const whereCondition: any = { 
     workspaceId,
     ...(params.q && {
@@ -95,13 +89,12 @@ export default async function TransactionsPage({
         </div>
         <div className="flex gap-2 w-full md:w-auto">
           {!params.cardId && 
-            <TransactionFilterButton accounts={accounts} cards={cards} /> // (Nota: Esse componente também precisará de ajuste de cor depois)
+            <TransactionFilterButton accounts={accounts} cards={cards} categories={categories} />
           }
           <ExportButton data={transactionsForExport} />
         </div>
       </div>
 
-      {/* CORREÇÃO DE CORES AQUI: bg-card, border-border */}
       <Card className="bg-card border-border shadow-sm overflow-hidden mx-1">
         <CardHeader className="border-b border-border bg-muted/40 px-6 py-4">
             <SearchInput />
@@ -153,7 +146,6 @@ export default async function TransactionsPage({
                     </TableCell>
 
                     <TableCell>
-                        {/* Badges já usam cores semânticas geralmente, mas ajustei */}
                         {t.creditCard ? (
                             t.isPaid ? (
                                 <Badge variant="outline" className="bg-emerald-500/10 text-emerald-600 border-emerald-500/20 font-normal">

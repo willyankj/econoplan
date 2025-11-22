@@ -741,3 +741,31 @@ export async function updateWorkspaceName(workspaceId: string, formData: FormDat
   revalidatePath('/dashboard'); // Atualiza o nome na Sidebar também
   return { success: true };
 }
+
+// --- ADICIONE ISTO NO FINAL DO ARQUIVO ---
+
+export async function updateWorkspaceName(workspaceId: string, formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.email) return { error: "Não autorizado" };
+
+  const name = formData.get("name") as string;
+
+  // Verifica permissão (Owner ou Admin)
+  const user = await prisma.user.findUnique({
+    where: { email: session.user.email },
+    include: { tenant: true }
+  });
+
+  if (!user || (user.role !== 'OWNER' && user.role !== 'ADMIN')) {
+    return { error: "Sem permissão." };
+  }
+
+  await prisma.workspace.update({
+    where: { id: workspaceId },
+    data: { name }
+  });
+
+  revalidatePath('/dashboard/settings');
+  revalidatePath('/dashboard'); // Atualiza o nome na Sidebar também
+  return { success: true };
+}

@@ -1,15 +1,15 @@
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { CalendarDays, CreditCard, Trash2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { CalendarDays } from "lucide-react";
 import { NewCardModal } from "@/components/dashboard/cards/new-card-modal";
 import { BankLogo } from "@/components/ui/bank-logo";
 import { PayInvoiceModal } from "@/components/dashboard/cards/pay-invoice-modal";
 import { CardActions } from "@/components/dashboard/cards/card-actions";
-import { getUserWorkspace } from "@/lib/get-user-workspace"; // <--- IMPORTANTE
+import { getUserWorkspace } from "@/lib/get-user-workspace"; // Importante
 
 export default async function CardsPage() {
-  const { workspaceId } = await getUserWorkspace(); // <--- CORREÇÃO WORKSPACE
+  // CORREÇÃO: Busca o workspace ativo
+  const { workspaceId } = await getUserWorkspace();
   if (!workspaceId) return <div>Sem acesso.</div>;
 
   // 1. Busca Contas
@@ -36,7 +36,11 @@ export default async function CardsPage() {
   const cards = rawCards.map(c => ({
     ...c,
     limit: Number(c.limit),
-    transactions: c.transactions.map(t => ({ ...t, amount: Number(t.amount) }))
+    transactions: c.transactions.map(t => ({ 
+        ...t, 
+        amount: Number(t.amount),
+        isPaid: t.isPaid // Importante passar isso
+    }))
   }));
 
   const formatCurrency = (value: number) => {
@@ -55,17 +59,16 @@ export default async function CardsPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {cards.map((card) => {
-          // --- CORREÇÃO DO CÁLCULO DA FATURA ---
-          // Despesa (EXPENSE) = Aumenta a fatura
-          // Pagamento/Crédito (INCOME) = Diminui a fatura
+          // --- CORREÇÃO CRÍTICA: CÁLCULO DA FATURA ---
           const currentInvoice = card.transactions.reduce((acc, t) => {
+            if (t.isPaid) return acc; // SE JÁ FOI PAGO, NÃO SOMA NA FATURA ATUAL
+            
             if (t.type === 'EXPENSE') return acc + t.amount;
             if (t.type === 'INCOME') return acc - t.amount;
             return acc;
           }, 0);
 
           const percentage = Math.min((currentInvoice / card.limit) * 100, 100);
-          // Disponível é o limite menos o que foi gasto (independente se pagou ou não, tecnicamente, mas aqui simplificamos)
           const available = card.limit - currentInvoice; 
 
           return (

@@ -1,11 +1,9 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { redirect } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Trash2, Trophy, Calendar, Target } from "lucide-react"; // <--- ADICIONEI O TARGET AQUI
+import { Trash2, Trophy, Calendar, Target } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { getUserWorkspace } from "@/lib/get-user-workspace"; // Importante
 
 // Componentes
 import { DepositGoalModal } from "@/components/dashboard/goals/deposit-goal-modal";
@@ -15,18 +13,12 @@ import { EditGoalModal } from "@/components/dashboard/goals/edit-goal-modal";
 import { GoalInfoDialog } from "@/components/dashboard/goals/goal-info-dialog";
 
 export default async function GoalsPage() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) redirect("/login");
+  // CORREÇÃO: Busca o workspace ativo corretamente
+  const { workspaceId } = await getUserWorkspace();
+  
+  if (!workspaceId) return <div>Selecione um workspace</div>;
 
-  const user = await prisma.user.findUnique({
-    where: { email: session.user.email },
-    include: { workspaces: true }
-  });
-
-  if (!user || user.workspaces.length === 0) return <div>Sem workspace</div>;
-  const workspaceId = user.workspaces[0].workspaceId;
-
-  // 1. Busca Metas
+  // 1. Busca Metas do workspace correto
   const rawGoals = await prisma.goal.findMany({
     where: { workspaceId },
     include: { transactions: true },
@@ -43,7 +35,7 @@ export default async function GoalsPage() {
     }))
   }));
 
-  // 2. Busca Contas
+  // 2. Busca Contas do workspace correto
   const rawAccounts = await prisma.bankAccount.findMany({ where: { workspaceId } });
   const accountsClean = rawAccounts.map(a => ({...a, balance: Number(a.balance)}));
 
@@ -76,12 +68,8 @@ export default async function GoalsPage() {
                 </CardTitle>
                 
                 <div className="flex items-center gap-1">
-                    {/* Botão de Inteligência */}
                     <GoalInfoDialog goal={goal} />
-
-                    {/* Botão Editar */}
                     <EditGoalModal goal={goal} />
-
                     <form action={async () => {
                         'use server';
                         await deleteGoal(goal.id);
@@ -123,7 +111,6 @@ export default async function GoalsPage() {
 
         {goals.length === 0 && (
            <div className="col-span-full flex flex-col items-center justify-center p-10 border-2 border-dashed border-border rounded-xl text-muted-foreground">
-              {/* AQUI ESTAVA O ERRO */}
               <Target className="w-12 h-12 mb-4 opacity-50" />
               <p>Nenhum objetivo definido.</p>
               <p className="text-sm">Comece a guardar dinheiro para seus sonhos.</p>

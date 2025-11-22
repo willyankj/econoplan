@@ -17,8 +17,8 @@ export function ExportButton({ data }: { data: any[] }) {
 
     const csvContent = [headers.join(";"), ...rows.map(r => r.join(";"))].join("\n");
 
-    // CORREÇÃO: \uFEFF é o BOM (Byte Order Mark) que diz pro Excel: "Isso é UTF-8"
-    const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
+    // CORREÇÃO: Adiciona BOM (\uFEFF) e remove o ponto e vírgula extra no tipo
+    const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8" });
     
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");

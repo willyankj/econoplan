@@ -7,20 +7,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Building2, Save, Users, Shield, CreditCard, Plus, Trash2, Briefcase } from "lucide-react";
-import { updateTenantName, inviteMember, removeMember, deleteWorkspace } from "@/app/dashboard/actions";
+import { Building2, Save, Users, Shield, CreditCard, Trash2, Briefcase } from "lucide-react";
+import { updateTenantName, removeMember, deleteWorkspace } from "@/app/dashboard/actions";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { PermissionsForm } from "@/components/dashboard/settings/permissions-form";
 import { InviteMemberForm } from "@/components/dashboard/settings/invite-member-form";
 import { ManageAccessModal } from "@/components/dashboard/settings/manage-access-modal";
+import { EditWorkspaceModal } from "@/components/dashboard/settings/edit-workspace-modal"; // <--- IMPORT NOVO
 import { DEFAULT_TENANT_SETTINGS } from "@/lib/permissions";
-import { 
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue 
-} from "@/components/ui/select";
 
 export default async function SettingsPage() {
   const session = await getServerSession(authOptions);
@@ -93,7 +87,6 @@ export default async function SettingsPage() {
                     <CardDescription className="text-muted-foreground">Dados visíveis para todos os membros.</CardDescription>
                 </CardHeader>
                 <CardContent>
-                    {/* CORREÇÃO AQUI: Wrapper assíncrono para satisfazer o TypeScript */}
                     <form 
                       action={async (formData) => {
                         'use server';
@@ -141,22 +134,27 @@ export default async function SettingsPage() {
                                 </div>
                             </div>
                             
-                            {isAdmin && tenant.workspaces.length > 1 && (
-                                <form action={async () => {
-                                    'use server';
-                                    await deleteWorkspace(ws.id);
-                                }}>
-                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-rose-500 hover:bg-rose-500/10">
-                                        <Trash2 className="w-4 h-4" />
-                                    </Button>
-                                </form>
-                            )}
+                            <div className="flex items-center gap-1">
+                                {/* BOTÃO DE EDITAR (NOVO) */}
+                                {isAdmin && <EditWorkspaceModal workspace={ws} />}
+
+                                {isAdmin && tenant.workspaces.length > 1 && (
+                                    <form action={async () => {
+                                        'use server';
+                                        await deleteWorkspace(ws.id);
+                                    }}>
+                                        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-rose-500 hover:bg-rose-500/10">
+                                            <Trash2 className="w-4 h-4" />
+                                        </Button>
+                                    </form>
+                                )}
+                            </div>
                         </div>
                     ))}
                 </CardContent>
             </Card>
 
-            {/* MEMBROS */}
+            {/* MEMBROS (Mantido igual) */}
             <Card className="bg-card border-border shadow-sm">
                 <CardHeader>
                     <CardTitle className="text-foreground flex items-center gap-2">
@@ -166,7 +164,6 @@ export default async function SettingsPage() {
                     <CardDescription className="text-muted-foreground">Gerencie quem acessa sua organização.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
-                    {/* Formulário de Convite */}
                     {isAdmin && <InviteMemberForm workspaces={tenant.workspaces} />}
 
                     <div className="space-y-3">
@@ -202,7 +199,6 @@ export default async function SettingsPage() {
                                         {u.role}
                                     </span>
 
-                                    {/* BOTÃO DE GERENCIAR ACESSOS */}
                                     {isAdmin && (
                                         <ManageAccessModal 
                                             user={u} 
