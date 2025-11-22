@@ -2,8 +2,8 @@
 
 import Link from 'next/link';
 import { 
-  LayoutDashboard, TrendingUp, Settings, Trophy, Target, CreditCard, 
-  LogOut, Building2, Landmark, PieChart 
+  LayoutDashboard, TrendingUp, Settings, Target, CreditCard, 
+  Building2, Landmark, PieChart, ChevronRight 
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { WorkspaceSwitcher } from '@/components/dashboard/workspace-switcher';
@@ -34,7 +34,6 @@ export function SidebarUI({ user, workspaces, activeWorkspaceId, tenantName, rol
   ];
 
   return (
-    // ALTERADO: bg-card ou bg-background
     <div className="flex flex-col h-full bg-card text-card-foreground">
       {/* Logo Area */}
       <div className="p-6 border-b border-border flex items-center gap-3">
@@ -55,10 +54,22 @@ export function SidebarUI({ user, workspaces, activeWorkspaceId, tenantName, rol
             <span className="text-xs text-muted-foreground font-bold uppercase tracking-wider">Organização</span>
             <span className="text-[10px] bg-muted px-2 py-0.5 rounded text-muted-foreground border border-border">{role}</span>
         </div>
-        <div className="flex items-center gap-2 px-2 text-sm font-medium">
-            <Building2 className="w-4 h-4 text-muted-foreground" />
-            {tenantName}
-        </div>
+        
+        {/* LINK PARA A VISÃO GERAL DA ORGANIZAÇÃO */}
+        <Link 
+          href="/dashboard/organization"
+          className="flex items-center justify-between group px-2 py-2 rounded-lg hover:bg-muted transition-colors cursor-pointer"
+          onClick={onNavigate}
+        >
+            <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                <div className="w-8 h-8 rounded bg-primary/10 flex items-center justify-center text-primary">
+                    <Building2 className="w-4 h-4" />
+                </div>
+                {tenantName}
+            </div>
+            <ChevronRight className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+        </Link>
+
         <div className="h-px bg-border" />
         <WorkspaceSwitcher workspaces={workspaces} activeWorkspaceId={activeWorkspaceId} />
       </div>

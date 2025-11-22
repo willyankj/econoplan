@@ -5,7 +5,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
 import { cookies } from 'next/headers';
-import { DEFAULT_TENANT_SETTINGS, checkPermission } from "@/lib/permissions";
+import { checkPermission } from "@/lib/permissions";
 
 // ============================================================================
 // 1. GESTÃO DO TENANT, WORKSPACE E MEMBROS
@@ -97,13 +97,39 @@ export async function createWorkspace(formData: FormData) {
   return { success: true };
 }
 
+export async function updateWorkspaceName(workspaceId: string, formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.email) return { error: "Não autorizado" };
+
+  const name = formData.get("name") as string;
+
+  // Verifica permissão (Owner ou Admin)
+  const user = await prisma.user.findUnique({
+    where: { email: session.user.email },
+    include: { tenant: true }
+  });
+
+  if (!user || (user.role !== 'OWNER' && user.role !== 'ADMIN')) {
+    return { error: "Sem permissão." };
+  }
+
+  await prisma.workspace.update({
+    where: { id: workspaceId },
+    data: { name }
+  });
+
+  revalidatePath('/dashboard/settings');
+  revalidatePath('/dashboard'); 
+  return { success: true };
+}
+
 export async function inviteMember(formData: FormData) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) return { error: "Não autorizado" };
 
   const email = formData.get("email") as string;
   const role = formData.get("role") as "ADMIN" | "MEMBER";
-  const workspaceId = formData.get("workspaceId") as string; // <--- NOVO CAMPO
+  const workspaceId = formData.get("workspaceId") as string;
 
   if (!workspaceId) return { error: "Selecione um workspace." };
 
@@ -116,14 +142,12 @@ export async function inviteMember(formData: FormData) {
     return { error: "Sem permissão." };
   }
 
-  // Verifica se o workspace pertence mesmo ao tenant (Segurança)
   const targetWorkspace = currentUser.tenant.workspaces.find(w => w.id === workspaceId);
   if (!targetWorkspace) return { error: "Workspace inválido." };
 
   const existingUser = await prisma.user.findUnique({ where: { email } });
 
   if (existingUser) {
-    // Atualiza usuário existente
     await prisma.user.update({
       where: { email },
       data: { 
@@ -138,7 +162,6 @@ export async function inviteMember(formData: FormData) {
       }
     });
   } else {
-    // Cria novo usuário
     await prisma.user.create({
       data: {
         email,
@@ -172,6 +195,32 @@ export async function deleteWorkspace(workspaceId: string) {
     return { success: true };
 }
 
+export async function toggleWorkspaceAccess(userId: string, workspaceId: string, hasAccess: boolean) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.email) return { error: "Não autorizado" };
+
+  const currentUser = await prisma.user.findUnique({ where: { email: session.user.email } });
+  if (!currentUser || (currentUser.role !== 'OWNER' && currentUser.role !== 'ADMIN')) {
+      return { error: "Sem permissão." };
+  }
+
+  if (hasAccess) {
+    await prisma.workspaceMember.create({
+        data: { userId, workspaceId, role: 'MEMBER' }
+    });
+  } else {
+    const count = await prisma.workspaceMember.count({ where: { userId } });
+    if (count <= 1) return { error: "O usuário precisa ter pelo menos um workspace." };
+
+    await prisma.workspaceMember.deleteMany({
+        where: { userId, workspaceId }
+    });
+  }
+
+  revalidatePath('/dashboard/settings');
+  return { success: true };
+}
+
 
 // ============================================================================
 // 2. TRANSAÇÕES (RECEITAS E DESPESAS)
@@ -200,19 +249,14 @@ export async function createTransaction(formData: FormData) {
   const categoryName = formData.get("category") as string;
   const paymentMethod = formData.get("paymentMethod") as "ACCOUNT" | "CREDIT_CARD";
 
-  // 1. Trata a Categoria
   const category = await prisma.category.upsert({
     where: {
-      workspaceId_name: {
-        workspaceId: workspaceId,
-        name: categoryName
-      }
+      workspaceId_name: { workspaceId, name: categoryName }
     },
     update: {},
     create: { name: categoryName, type, workspaceId }
   });
 
-  // --- FLUXO 1: PAGAMENTO VIA CONTA (DÉBITO/PIX) ---
   if (paymentMethod === "ACCOUNT") {
     const accountId = formData.get("accountId") as string;
     if (!accountId) return { error: "Selecione uma conta bancária!" };
@@ -222,19 +266,16 @@ export async function createTransaction(formData: FormData) {
         description, amount, type, date, workspaceId,
         bankAccountId: accountId,
         categoryId: category.id,
-        isPaid: true // Saiu da conta, está pago
+        isPaid: true
       }
     });
 
-    // Atualiza saldo da conta
     if (type === 'INCOME') {
       await prisma.bankAccount.update({ where: { id: accountId }, data: { balance: { increment: amount } } });
     } else {
       await prisma.bankAccount.update({ where: { id: accountId }, data: { balance: { decrement: amount } } });
     }
   } 
-  
-  // --- FLUXO 2: CARTÃO DE CRÉDITO ---
   else if (paymentMethod === "CREDIT_CARD") {
     const cardId = formData.get("cardId") as string;
     if (!cardId) return { error: "Selecione um cartão!" };
@@ -242,7 +283,6 @@ export async function createTransaction(formData: FormData) {
     const card = await prisma.creditCard.findUnique({ where: { id: cardId } });
     if (!card) return { error: "Cartão não encontrado" };
 
-    // Calcula data da fatura (Competência)
     let invoiceDate = new Date(date);
     if (date.getDate() >= card.closingDay) {
        invoiceDate.setMonth(invoiceDate.getMonth() + 1);
@@ -253,7 +293,7 @@ export async function createTransaction(formData: FormData) {
         description, amount, type, date, workspaceId,
         creditCardId: cardId,
         categoryId: category.id,
-        isPaid: false // Não pagou ainda (só na fatura)
+        isPaid: false
       }
     });
   }
@@ -262,6 +302,7 @@ export async function createTransaction(formData: FormData) {
   revalidatePath('/dashboard/transactions');
   revalidatePath('/dashboard/cards');
   revalidatePath('/dashboard/accounts');
+  revalidatePath('/dashboard/organization');
   return { success: true };
 }
 
@@ -278,7 +319,6 @@ export async function updateTransaction(id: string, formData: FormData) {
   const oldTransaction = await prisma.transaction.findUnique({ where: { id } });
   if (!oldTransaction) return { error: "Erro" };
 
-  // Trata categoria
   const category = await prisma.category.upsert({
     where: { workspaceId_name: { workspaceId: oldTransaction.workspaceId, name: categoryName } },
     update: {},
@@ -286,11 +326,13 @@ export async function updateTransaction(id: string, formData: FormData) {
   });
   
   if (oldTransaction.bankAccountId && oldTransaction.isPaid) {
+      // Reverte saldo antigo
       if (oldTransaction.type === 'INCOME') {
           await prisma.bankAccount.update({ where: { id: oldTransaction.bankAccountId }, data: { balance: { decrement: oldTransaction.amount } } });
       } else {
           await prisma.bankAccount.update({ where: { id: oldTransaction.bankAccountId }, data: { balance: { increment: oldTransaction.amount } } });
       }
+      // Aplica saldo novo
       if (oldTransaction.type === 'INCOME') {
           await prisma.bankAccount.update({ where: { id: oldTransaction.bankAccountId }, data: { balance: { increment: amount } } });
       } else {
@@ -305,6 +347,7 @@ export async function updateTransaction(id: string, formData: FormData) {
   
   revalidatePath('/dashboard/transactions');
   revalidatePath('/dashboard');
+  revalidatePath('/dashboard/organization');
   return { success: true };
 }
 
@@ -328,6 +371,7 @@ export async function deleteTransaction(id: string) {
   revalidatePath('/dashboard');
   revalidatePath('/dashboard/transactions');
   revalidatePath('/dashboard/cards');
+  revalidatePath('/dashboard/organization');
   return { success: true };
 }
 
@@ -355,6 +399,7 @@ export async function createAccount(formData: FormData) {
     }
   });
   revalidatePath('/dashboard/accounts');
+  revalidatePath('/dashboard/organization');
   return { success: true };
 }
 
@@ -369,6 +414,7 @@ export async function updateAccount(id: string, formData: FormData) {
   });
   revalidatePath('/dashboard/accounts');
   revalidatePath('/dashboard');
+  revalidatePath('/dashboard/organization');
   return { success: true };
 }
 
@@ -376,6 +422,7 @@ export async function deleteAccount(id: string) {
   await prisma.bankAccount.delete({ where: { id } });
   revalidatePath('/dashboard/accounts');
   revalidatePath('/dashboard');
+  revalidatePath('/dashboard/organization');
   return { success: true };
 }
 
@@ -393,7 +440,6 @@ export async function createCreditCard(formData: FormData) {
       include: { workspaces: true, tenant: true } 
   });
   
-  // --- VERIFICAÇÃO DE SEGURANÇA (PERMISSÕES) ---
   const canCreate = checkPermission(user!.role, user!.tenant.settings, 'canCreateCards');
   if (!canCreate) {
       return { error: "Seu perfil não tem permissão para criar cartões." };
@@ -502,6 +548,7 @@ export async function payCreditCardInvoice(formData: FormData) {
   revalidatePath('/dashboard/cards');
   revalidatePath('/dashboard/accounts');
   revalidatePath('/dashboard/transactions');
+  revalidatePath('/dashboard/organization');
   
   return { success: true };
 }
@@ -592,6 +639,33 @@ export async function createGoal(formData: FormData) {
   return { success: true };
 }
 
+// --- NOVA AÇÃO PARA METAS COMPARTILHADAS ---
+export async function createSharedGoal(formData: FormData) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.email) return { error: "Não autorizado" };
+
+  const user = await prisma.user.findUnique({
+    where: { email: session.user.email },
+    include: { tenant: true }
+  });
+
+  if (!user) return { error: "Erro usuário" };
+
+  await prisma.goal.create({
+    data: {
+      name: formData.get("name") as string,
+      targetAmount: parseFloat(formData.get("targetAmount") as string),
+      currentAmount: 0,
+      deadline: formData.get("deadline") ? new Date(formData.get("deadline") as string) : null,
+      tenantId: user.tenantId,
+      workspaceId: null
+    }
+  });
+
+  revalidatePath('/dashboard/organization');
+  return { success: true };
+}
+
 export async function updateGoal(id: string, formData: FormData) {
   const name = formData.get("name") as string;
   const targetAmount = parseFloat(formData.get("targetAmount") as string);
@@ -606,23 +680,33 @@ export async function updateGoal(id: string, formData: FormData) {
     }
   });
   revalidatePath('/dashboard/goals');
+  revalidatePath('/dashboard/organization');
   return { success: true };
 }
 
 export async function deleteGoal(id: string) {
   await prisma.goal.delete({ where: { id } });
   revalidatePath('/dashboard/goals');
+  revalidatePath('/dashboard/organization');
   return { success: true };
 }
+
+// --- CORREÇÃO PRINCIPAL AQUI EMBAIXO ---
 
 export async function addMoneyToGoal(goalId: string, amount: number, accountId: string) {
   const goal = await prisma.goal.findUnique({ where: { id: goalId } });
   if (!goal) return { error: "Meta não encontrada" };
 
+  // FIX: Buscar a conta para saber o workspaceId CORRETO
+  const account = await prisma.bankAccount.findUnique({ where: { id: accountId } });
+  if (!account) return { error: "Conta não encontrada" };
+
+  const workspaceId = account.workspaceId; // <--- USAMOS O DA CONTA, NÃO DA META
+
   const category = await prisma.category.upsert({
-    where: { workspaceId_name: { workspaceId: goal.workspaceId, name: "Investimentos" } },
+    where: { workspaceId_name: { workspaceId: workspaceId, name: "Investimentos" } },
     update: {},
-    create: { name: "Investimentos", type: "EXPENSE", workspaceId: goal.workspaceId }
+    create: { name: "Investimentos", type: "EXPENSE", workspaceId: workspaceId }
   });
 
   await prisma.transaction.create({
@@ -631,7 +715,7 @@ export async function addMoneyToGoal(goalId: string, amount: number, accountId: 
       amount: amount,
       type: "EXPENSE", 
       date: new Date(),
-      workspaceId: goal.workspaceId,
+      workspaceId: workspaceId,
       bankAccountId: accountId,
       goalId: goal.id,
       isPaid: true,
@@ -644,6 +728,7 @@ export async function addMoneyToGoal(goalId: string, amount: number, accountId: 
 
   revalidatePath('/dashboard/goals');
   revalidatePath('/dashboard/accounts');
+  revalidatePath('/dashboard/organization');
   return { success: true };
 }
 
@@ -651,12 +736,18 @@ export async function withdrawMoneyFromGoal(goalId: string, amount: number, acco
     const goal = await prisma.goal.findUnique({ where: { id: goalId } });
     if (!goal) return { error: "Meta não encontrada" };
   
+    // FIX: Buscar a conta para saber o workspaceId CORRETO
+    const account = await prisma.bankAccount.findUnique({ where: { id: accountId } });
+    if (!account) return { error: "Conta não encontrada" };
+
+    const workspaceId = account.workspaceId; // <--- USAMOS O DA CONTA
+
     await prisma.goal.update({ where: { id: goalId }, data: { currentAmount: { decrement: amount } } });
 
     const category = await prisma.category.upsert({
-        where: { workspaceId_name: { workspaceId: goal.workspaceId, name: "Resgate Investimento" } },
+        where: { workspaceId_name: { workspaceId: workspaceId, name: "Resgate Investimento" } },
         update: {},
-        create: { name: "Resgate Investimento", type: "INCOME", workspaceId: goal.workspaceId }
+        create: { name: "Resgate Investimento", type: "INCOME", workspaceId: workspaceId }
     });
 
     await prisma.transaction.create({
@@ -665,7 +756,7 @@ export async function withdrawMoneyFromGoal(goalId: string, amount: number, acco
         amount: amount,
         type: "INCOME",
         date: new Date(),
-        workspaceId: goal.workspaceId,
+        workspaceId: workspaceId,
         bankAccountId: accountId,
         goalId: goal.id,
         isPaid: true,
@@ -677,69 +768,6 @@ export async function withdrawMoneyFromGoal(goalId: string, amount: number, acco
   
     revalidatePath('/dashboard/goals');
     revalidatePath('/dashboard/accounts');
+    revalidatePath('/dashboard/organization');
     return { success: true };
-}
-
-// --- GESTÃO DE ACESSO A WORKSPACES ---
-
-export async function toggleWorkspaceAccess(userId: string, workspaceId: string, hasAccess: boolean) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) return { error: "Não autorizado" };
-
-  // Verifica se quem está editando é Admin ou Owner
-  const currentUser = await prisma.user.findUnique({ where: { email: session.user.email } });
-  if (!currentUser || (currentUser.role !== 'OWNER' && currentUser.role !== 'ADMIN')) {
-      return { error: "Sem permissão." };
-  }
-
-  if (hasAccess) {
-    // ADICIONAR ACESSO
-    await prisma.workspaceMember.create({
-        data: {
-            userId,
-            workspaceId,
-            role: 'MEMBER' // Entra como membro por padrão
-        }
-    });
-  } else {
-    // REMOVER ACESSO
-    // Verifica se não é o último workspace do usuário (para não deixá-lo órfão)
-    const count = await prisma.workspaceMember.count({ where: { userId } });
-    if (count <= 1) return { error: "O usuário precisa ter pelo menos um workspace." };
-
-    await prisma.workspaceMember.deleteMany({
-        where: { userId, workspaceId }
-    });
-  }
-
-  revalidatePath('/dashboard/settings');
-  return { success: true };
-}
-
-// --- ADICIONE ISTO NO FINAL DO ARQUIVO ---
-
-export async function updateWorkspaceName(workspaceId: string, formData: FormData) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) return { error: "Não autorizado" };
-
-  const name = formData.get("name") as string;
-
-  // Verifica permissão (Owner ou Admin)
-  const user = await prisma.user.findUnique({
-    where: { email: session.user.email },
-    include: { tenant: true }
-  });
-
-  if (!user || (user.role !== 'OWNER' && user.role !== 'ADMIN')) {
-    return { error: "Sem permissão." };
-  }
-
-  await prisma.workspace.update({
-    where: { id: workspaceId },
-    data: { name }
-  });
-
-  revalidatePath('/dashboard/settings');
-  revalidatePath('/dashboard'); // Atualiza o nome na Sidebar também
-  return { success: true };
 }
