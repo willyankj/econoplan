@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Trash2, Loader2 } from "lucide-react";
 import { deleteTransaction } from "../actions";
+import { toast } from "sonner"; // <--- IMPORTANTE
 
 export function DeleteTransactionButton({ id }: { id: string }) {
   const [loading, setLoading] = useState(false);
@@ -12,8 +13,14 @@ export function DeleteTransactionButton({ id }: { id: string }) {
     if (!confirm("Tem certeza que deseja excluir?")) return;
     
     setLoading(true);
-    await deleteTransaction(id);
+    const result = await deleteTransaction(id);
     setLoading(false);
+
+    if (result?.error) {
+        toast.error("Não permitido", { description: result.error });
+    } else {
+        toast.success("Transação excluída.");
+    }
   }
 
   return (

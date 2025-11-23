@@ -14,6 +14,7 @@ import {
 import { deleteCreditCard } from "@/app/dashboard/actions";
 import { useRouter } from "next/navigation";
 import { EditCardModal } from "./edit-card-modal";
+import { toast } from "sonner"; // <--- IMPORTANTE
 
 interface CardActionsProps {
   card: any;
@@ -24,6 +25,18 @@ export function CardActions({ card, accounts }: CardActionsProps) {
   const [showEdit, setShowEdit] = useState(false);
   const router = useRouter();
 
+  const handleDelete = async () => {
+    if(confirm("Tem certeza? Isso apagará o histórico deste cartão.")) {
+        const result = await deleteCreditCard(card.id);
+        
+        if (result?.error) {
+            toast.error("Erro ao excluir", { description: result.error });
+        } else {
+            toast.success("Cartão excluído.");
+        }
+    }
+  };
+
   return (
     <>
       <DropdownMenu>
@@ -32,7 +45,7 @@ export function CardActions({ card, accounts }: CardActionsProps) {
             <MoreHorizontal className="w-4 h-4" />
           </Button>
         </DropdownMenuTrigger>
-        {/* CORREÇÃO DE CORES AQUI */}
+        
         <DropdownMenuContent align="end" className="bg-card border-border text-card-foreground">
           <DropdownMenuLabel>Ações</DropdownMenuLabel>
           <DropdownMenuSeparator className="bg-border" />
@@ -51,11 +64,7 @@ export function CardActions({ card, accounts }: CardActionsProps) {
           <DropdownMenuSeparator className="bg-border" />
           
           <DropdownMenuItem 
-            onClick={async () => {
-                if(confirm("Tem certeza? Isso apagará o histórico deste cartão.")) {
-                    await deleteCreditCard(card.id);
-                }
-            }}
+            onClick={handleDelete}
             className="cursor-pointer text-destructive hover:bg-destructive/10 focus:bg-destructive/10 focus:text-destructive"
           >
             <Trash2 className="w-4 h-4 mr-2" /> Excluir

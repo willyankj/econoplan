@@ -23,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { createWorkspace, switchWorkspace } from "@/app/dashboard/actions";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 
 interface WorkspaceSwitcherProps {
   workspaces: { id: string; name: string }[];
@@ -41,10 +42,18 @@ export function WorkspaceSwitcher({ workspaces, activeWorkspaceId }: WorkspaceSw
     event.preventDefault();
     setIsLoading(true);
     const formData = new FormData(event.currentTarget);
-    await createWorkspace(formData);
+    
+    const result = await createWorkspace(formData);
+    
     setIsLoading(false);
-    setOpen(false);
-    router.refresh();
+    
+    if (result?.error) {
+        toast.error("Erro", { description: result.error });
+    } else {
+        toast.success("Workspace criado!");
+        setOpen(false);
+        router.refresh();
+    }
   }
 
   function onSelectWorkspace(id: string) {
@@ -57,7 +66,6 @@ export function WorkspaceSwitcher({ workspaces, activeWorkspaceId }: WorkspaceSw
     <Dialog open={open} onOpenChange={setOpen}>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          {/* CORREÇÃO: bg-muted/50, border-input, text-foreground */}
           <Button
             variant="outline"
             role="combobox"
@@ -78,7 +86,6 @@ export function WorkspaceSwitcher({ workspaces, activeWorkspaceId }: WorkspaceSw
           </Button>
         </DropdownMenuTrigger>
         
-        {/* CORREÇÃO DROPDOWN: bg-popover, text-popover-foreground */}
         <DropdownMenuContent className="w-[200px] bg-popover border-border text-popover-foreground shadow-md">
           <DropdownMenuLabel className="text-xs text-muted-foreground">Meus Workspaces</DropdownMenuLabel>
           
@@ -106,7 +113,6 @@ export function WorkspaceSwitcher({ workspaces, activeWorkspaceId }: WorkspaceSw
         </DropdownMenuContent>
       </DropdownMenu>
 
-      {/* CORREÇÃO MODAL: bg-background */}
       <DialogContent className="bg-background border-border text-foreground">
         <DialogHeader>
           <DialogTitle>Criar Workspace</DialogTitle>

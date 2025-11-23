@@ -13,17 +13,15 @@ import { EditGoalModal } from "@/components/dashboard/goals/edit-goal-modal";
 import { GoalInfoDialog } from "@/components/dashboard/goals/goal-info-dialog";
 
 export default async function GoalsPage() {
-  // 1. Pega o Workspace E o Usuário (para saber o Tenant ID)
   const { workspaceId, user } = await getUserWorkspace();
   
   if (!workspaceId || !user) return <div>Selecione um workspace</div>;
 
-  // 2. BUSCA HÍBRIDA: Metas do Workspace OU Metas do Tenant (Compartilhadas)
   const rawGoals = await prisma.goal.findMany({
     where: {
       OR: [
-        { workspaceId: workspaceId }, // Minhas metas neste workspace
-        { tenantId: user.tenantId }   // Metas compartilhadas da organização
+        { workspaceId: workspaceId },
+        { tenantId: user.tenantId }
       ]
     },
     include: { transactions: true },
@@ -40,7 +38,6 @@ export default async function GoalsPage() {
     }))
   }));
 
-  // 3. Busca Contas (apenas deste workspace, para o membro usar seu próprio dinheiro)
   const rawAccounts = await prisma.bankAccount.findMany({ where: { workspaceId } });
   const accountsClean = rawAccounts.map(a => ({...a, balance: Number(a.balance)}));
 
@@ -63,13 +60,10 @@ export default async function GoalsPage() {
           const current = goal.currentAmount;
           const target = goal.targetAmount;
           const percentage = target > 0 ? Math.min((current / target) * 100, 100) : 0;
-          
-          // Flag visual para saber se é compartilhada
           const isShared = !!goal.tenantId;
 
           return (
             <Card key={goal.id} className={`relative overflow-hidden bg-card border-border transition-all group ${isShared ? 'border-purple-500/30' : 'hover:border-emerald-500/30'}`}>
-              {/* Faixa decorativa se for compartilhada */}
               {isShared && <div className="absolute top-0 left-0 w-1 h-full bg-purple-500" />}
 
               <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -79,7 +73,6 @@ export default async function GoalsPage() {
                 </CardTitle>
                 
                 <div className="flex items-center gap-1">
-                    {/* Flag visual explícita */}
                     {isShared && (
                         <span className="text-[10px] font-bold bg-purple-500/10 text-purple-500 px-2 py-0.5 rounded uppercase mr-2">
                             Conjunta
@@ -88,10 +81,6 @@ export default async function GoalsPage() {
 
                     <GoalInfoDialog goal={goal} />
                     
-                    {/* Só permite Editar/Excluir se for do workspace (ou se for Owner/Admin na tela de org) 
-                        Aqui na tela de Goals, vamos permitir editar, mas talvez fosse melhor restringir exclusão de metas globais por membros comuns.
-                        Por simplicidade, deixamos ativo, mas o ideal seria checar permissão. 
-                    */}
                     {!isShared && (
                         <>
                             <EditGoalModal goal={goal} />
@@ -119,12 +108,20 @@ export default async function GoalsPage() {
                 </div>
 
                 <div className="flex gap-2">
+                    {/* Botão GUARDAR: Sempre ativo */}
                     <div className="flex-1">
-                        {/* Membro deposita com SUAS contas do workspace atual */}
                         <DepositGoalModal goal={goal} accounts={accountsClean} type="DEPOSIT" />
                     </div>
-                    {/* Retirar de meta compartilhada pode ser perigoso, mas vamos deixar liberado por enquanto */}
-                    <DepositGoalModal goal={goal} accounts={accountsClean} type="WITHDRAW" />
+                    
+                    {/* Botão RESGATAR: Corrigido o layout e desativado se saldo for 0 */}
+                    <div className="flex-1"> 
+                        <DepositGoalModal 
+                            goal={goal} 
+                            accounts={accountsClean} 
+                            type="WITHDRAW" 
+                            disabled={current <= 0} // <--- LÓGICA PARA DESABILITAR
+                        />
+                    </div>
                 </div>
 
                 {goal.deadline && (

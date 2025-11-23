@@ -7,13 +7,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Building2, Save, Users, Shield, CreditCard, Trash2, Briefcase } from "lucide-react";
+import { Building2, Save, Users, Shield, CreditCard, Trash2, Briefcase, ScrollText } from "lucide-react";
 import { updateTenantName, removeMember, deleteWorkspace } from "@/app/dashboard/actions";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { PermissionsForm } from "@/components/dashboard/settings/permissions-form";
 import { InviteMemberForm } from "@/components/dashboard/settings/invite-member-form";
 import { ManageAccessModal } from "@/components/dashboard/settings/manage-access-modal";
-import { EditWorkspaceModal } from "@/components/dashboard/settings/edit-workspace-modal"; // <--- IMPORT NOVO
+import { EditWorkspaceModal } from "@/components/dashboard/settings/edit-workspace-modal"; 
+import { EditRoleModal } from "@/components/dashboard/settings/edit-role-modal"; 
+import { AuditList } from "@/components/dashboard/settings/audit-list"; 
 import { DEFAULT_TENANT_SETTINGS } from "@/lib/permissions";
 
 export default async function SettingsPage() {
@@ -42,6 +44,17 @@ export default async function SettingsPage() {
 
   const currentSettings = (tenant.settings || DEFAULT_TENANT_SETTINGS) as any;
 
+  // --- BUSCA DE LOGS (SÓ PARA DONO) ---
+  let auditLogs: any[] = [];
+  if (isOwner) {
+      auditLogs = await prisma.auditLog.findMany({
+          where: { tenantId: tenant.id },
+          include: { user: { select: { email: true } } },
+          orderBy: { createdAt: 'desc' },
+          take: 50
+      });
+  }
+
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
       <div>
@@ -50,7 +63,7 @@ export default async function SettingsPage() {
       </div>
 
       <Tabs defaultValue="general" className="w-full">
-        <TabsList className="bg-card border border-border w-full justify-start h-14 p-1 gap-2">
+        <TabsList className="bg-card border border-border w-full justify-start h-14 p-1 gap-2 overflow-x-auto">
           <TabsTrigger 
             value="general" 
             className="data-[state=active]:bg-muted data-[state=active]:text-foreground text-muted-foreground hover:text-foreground h-10 px-4"
@@ -65,6 +78,15 @@ export default async function SettingsPage() {
              <Shield className="w-4 h-4 mr-2" /> Permissões & Roles
           </TabsTrigger>
           
+          {isOwner && (
+             <TabsTrigger 
+                value="audit" 
+                className="data-[state=active]:bg-muted data-[state=active]:text-foreground text-muted-foreground hover:text-foreground h-10 px-4"
+             >
+                <ScrollText className="w-4 h-4 mr-2" /> Auditoria
+             </TabsTrigger>
+          )}
+
           <TabsTrigger 
             value="billing" 
             className="data-[state=active]:bg-muted data-[state=active]:text-foreground text-muted-foreground opacity-50 cursor-not-allowed h-10 px-4" 
@@ -135,7 +157,6 @@ export default async function SettingsPage() {
                             </div>
                             
                             <div className="flex items-center gap-1">
-                                {/* BOTÃO DE EDITAR (NOVO) */}
                                 {isAdmin && <EditWorkspaceModal workspace={ws} />}
 
                                 {isAdmin && tenant.workspaces.length > 1 && (
@@ -154,7 +175,7 @@ export default async function SettingsPage() {
                 </CardContent>
             </Card>
 
-            {/* MEMBROS (Mantido igual) */}
+            {/* MEMBROS */}
             <Card className="bg-card border-border shadow-sm">
                 <CardHeader>
                     <CardTitle className="text-foreground flex items-center gap-2">
@@ -191,13 +212,11 @@ export default async function SettingsPage() {
                                 </div>
                                 
                                 <div className="flex items-center gap-3 justify-between sm:justify-end w-full sm:w-auto">
-                                    <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wider border ${
-                                        u.role === 'OWNER' ? 'bg-amber-500/10 text-amber-600 border-amber-500/20' :
-                                        u.role === 'ADMIN' ? 'bg-blue-500/10 text-blue-600 border-blue-500/20' :
-                                        'bg-muted text-muted-foreground border-border'
-                                    }`}>
-                                        {u.role}
-                                    </span>
+                                    
+                                    <EditRoleModal 
+                                        user={{ id: u.id, name: u.name, role: u.role }} 
+                                        currentUserRole={user.role} 
+                                    />
 
                                     {isAdmin && (
                                         <ManageAccessModal 
@@ -224,6 +243,13 @@ export default async function SettingsPage() {
         <TabsContent value="permissions" className="mt-6">
              <PermissionsForm settings={currentSettings} isOwner={isOwner} />
         </TabsContent>
+        
+        {/* --- ABA AUDITORIA (SÓ OWNER) --- */}
+        {isOwner && (
+            <TabsContent value="audit" className="mt-6">
+                <AuditList logs={auditLogs} />
+            </TabsContent>
+        )}
 
       </Tabs>
     </div>

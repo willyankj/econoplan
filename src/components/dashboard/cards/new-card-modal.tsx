@@ -7,14 +7,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CreditCard, Loader2, Plus } from "lucide-react";
 import { createCreditCard } from '@/app/dashboard/actions';
-import { 
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue 
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BankLogo } from "@/components/ui/bank-logo";
+import { toast } from "sonner";
 
 export function NewCardModal({ accounts }: { accounts: any[] }) {
   const [open, setOpen] = useState(false);
@@ -24,9 +19,17 @@ export function NewCardModal({ accounts }: { accounts: any[] }) {
     event.preventDefault();
     setIsLoading(true);
     const formData = new FormData(event.currentTarget);
-    await createCreditCard(formData);
+    
+    const result = await createCreditCard(formData);
+    
     setIsLoading(false);
-    setOpen(false);
+    
+    if (result?.error) {
+        toast.error("Acesso Negado", { description: result.error });
+    } else {
+        toast.success("Cartão criado com sucesso!");
+        setOpen(false);
+    }
   }
 
   return (
@@ -75,7 +78,6 @@ export function NewCardModal({ accounts }: { accounts: any[] }) {
                   </SelectContent>
                 </Select>
             </div>
-
             <div className="grid gap-2">
                 <Label>Limite (R$)</Label>
                 <Input name="limit" type="number" step="0.01" placeholder="5000.00" className="bg-muted border-border text-foreground placeholder:text-muted-foreground" required />

@@ -1,5 +1,3 @@
-// prisma/schema.prisma
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -26,9 +24,8 @@ model Tenant {
   
   users              User[]
   workspaces         Workspace[]
-  
-  // ADICIONE ESTA LINHA:
   goals              Goal[]      
+  auditLogs          AuditLog[]   // <-- CORREÇÃO: Adicionado back-relation
 }
 
 model Workspace {
@@ -46,7 +43,7 @@ model Workspace {
   categories    Category[]
   budgets       Budget[]
   creditCards   CreditCard[]
-  goals         Goal[]            // Relacionamento com Metas
+  goals         Goal[]            
   
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
@@ -69,6 +66,8 @@ model User {
   accounts      Account[] 
   sessions      Session[]
   workspaces    WorkspaceMember[]
+  notifications Notification[]    
+  auditLogs     AuditLog[]        // <-- CORREÇÃO: Adicionado back-relation
   
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
@@ -138,6 +137,7 @@ model VerificationToken {
   identifier String
   token      String   @unique
   expires    DateTime
+ 
   @@unique([identifier, token])
 }
 
@@ -154,7 +154,7 @@ model BankAccount {
   
   workspaceId   String
   workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  
+ 
   transactions  Transaction[]
 
   createdAt     DateTime  @default(now())
@@ -166,7 +166,7 @@ model BankAccount {
 model Category {
   id            String          @id @default(uuid())
   name          String
-  icon          String?   
+  icon          String?
   type          TransactionType
   
   workspaceId   String
@@ -199,15 +199,12 @@ model Transaction {
   workspaceId   String
   workspace     Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   
-  // Conta Bancária (Opcional, pois pode ser cartão)
   bankAccountId String?
   bankAccount   BankAccount?    @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
   
-  // Cartão de Crédito (Opcional)
   creditCardId  String?
   creditCard    CreditCard?     @relation(fields: [creditCardId], references: [id], onDelete: Cascade)
   
-  // Vínculo com Meta (Opcional)
   goalId        String?
   goal          Goal?           @relation(fields: [goalId], references: [id], onDelete: SetNull)
   
@@ -236,7 +233,7 @@ model Budget {
   workspaceId   String
   workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   
-  categoryId    String?   
+  categoryId    String?
   category      Category? @relation(fields: [categoryId], references: [id], onDelete: Cascade)
 
   createdAt     DateTime  @default(now())
@@ -276,11 +273,9 @@ model Goal {
   currentAmount Decimal   @default(0) 
   deadline      DateTime?
   
-  // Workspace agora é opcional (?) para permitir metas do Tenant
   workspaceId   String?
   workspace     Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   
-  // Tenant é opcional (?) para permitir metas de Workspace
   tenantId      String?
   tenant        Tenant?    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   
@@ -291,4 +286,43 @@ model Goal {
 
   @@index([workspaceId])
   @@index([tenantId])
+}
+
+model Notification {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  title       String
+  message     String?
+  read        Boolean  @default(false)
+  type        String   @default("INFO")
+  link        String?
+  
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+}
+
+// -------------------------------------------------
+// Segurança e Auditoria
+// -------------------------------------------------
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  
+  action    String   
+  entity    String   
+  entityId  String?  
+  details   String?  
+
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([createdAt])
 }

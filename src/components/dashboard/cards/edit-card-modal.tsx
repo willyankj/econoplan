@@ -9,6 +9,7 @@ import { CreditCard, Loader2 } from "lucide-react";
 import { updateCreditCard } from '@/app/dashboard/actions';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BankLogo } from "@/components/ui/bank-logo";
+import { toast } from "sonner";
 
 interface EditCardModalProps {
   card: any;
@@ -24,14 +25,21 @@ export function EditCardModal({ card, accounts, open, onOpenChange }: EditCardMo
     event.preventDefault();
     setIsLoading(true);
     const formData = new FormData(event.currentTarget);
-    await updateCreditCard(card.id, formData);
+    
+    const result = await updateCreditCard(card.id, formData);
+    
     setIsLoading(false);
-    onOpenChange(false);
+
+    if (result?.error) {
+        toast.error("Ação Bloqueada", { description: result.error });
+    } else {
+        toast.success("Cartão atualizado.");
+        onOpenChange(false);
+    }
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      {/* CORES CORRIGIDAS */}
       <DialogContent className="bg-card border-border text-card-foreground sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle className="text-foreground flex items-center gap-2">

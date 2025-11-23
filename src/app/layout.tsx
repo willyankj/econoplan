@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import NextAuthSessionProvider from "@/providers/session-provider";
-import { ThemeProvider } from "@/components/theme-provider"; // <--- IMPORT NOVO
+import { ThemeProvider } from "@/components/theme-provider";
+import { Toaster } from "@/components/ui/sonner"; // <--- IMPORT NOVO
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -18,17 +19,16 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="pt-BR" suppressHydrationWarning> 
-      {/* suppressHydrationWarning é necessário para o next-themes não dar erro no console */}
       <body className={inter.className}>
         <NextAuthSessionProvider>
-          {/* Envolvendo tudo com o ThemeProvider */}
           <ThemeProvider
             attribute="class"
-            defaultTheme="dark" // Começa escuro por padrão
+            defaultTheme="dark"
             enableSystem
             disableTransitionOnChange
           >
             {children}
+            <Toaster /> {/* <--- ADICIONADO AQUI */}
           </ThemeProvider>
         </NextAuthSessionProvider>
       </body>

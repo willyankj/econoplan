@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Pencil, Loader2 } from "lucide-react";
 import { updateAccount } from '@/app/dashboard/actions';
+import { toast } from "sonner";
 
 interface AccountData {
   id: string;
@@ -23,9 +24,17 @@ export function EditAccountModal({ account }: { account: AccountData }) {
     event.preventDefault();
     setIsLoading(true);
     const formData = new FormData(event.currentTarget);
-    await updateAccount(account.id, formData);
+    
+    const result = await updateAccount(account.id, formData);
+    
     setIsLoading(false);
-    setOpen(false);
+
+    if (result?.error) {
+        toast.error("Não permitido", { description: result.error });
+    } else {
+        toast.success("Conta atualizada!");
+        setOpen(false);
+    }
   }
 
   return (
@@ -35,7 +44,6 @@ export function EditAccountModal({ account }: { account: AccountData }) {
             <Pencil className="w-4 h-4" />
         </Button>
       </DialogTrigger>
-      {/* CORREÇÃO DE CORES AQUI */}
       <DialogContent className="bg-card border-border text-card-foreground sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle className="text-foreground">Editar Conta</DialogTitle>
@@ -71,7 +79,6 @@ export function EditAccountModal({ account }: { account: AccountData }) {
                 defaultValue={account.balance}
                 className="bg-muted border-border text-foreground" 
             />
-            <p className="text-xs text-muted-foreground">Use para corrigir o saldo se estiver errado.</p>
           </div>
 
           <Button type="submit" disabled={isLoading} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white mt-2">

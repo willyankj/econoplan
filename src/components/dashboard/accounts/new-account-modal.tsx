@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Plus, Loader2 } from "lucide-react";
 import { createAccount } from '@/app/dashboard/actions';
+import { toast } from "sonner"; // <--- IMPORTANTE
 
 export function NewAccountModal() {
   const [open, setOpen] = useState(false);
@@ -16,8 +17,22 @@ export function NewAccountModal() {
     event.preventDefault();
     setIsLoading(true);
     const formData = new FormData(event.currentTarget);
-    await createAccount(formData);
+    
+    // Captura a resposta da Server Action
+    const result = await createAccount(formData);
+
     setIsLoading(false);
+
+    // Verifica se deu erro
+    if (result?.error) {
+        toast.error("Acesso Negado", {
+            description: result.error, // Mostra "Sem permissão..."
+        });
+        return; // Não fecha o modal
+    }
+
+    // Sucesso
+    toast.success("Conta criada com sucesso!");
     setOpen(false);
   }
 

@@ -2,13 +2,13 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
-import { Bell } from 'lucide-react';
 import { cookies } from 'next/headers';
 
 import { SidebarUI } from '@/components/dashboard/sidebar-ui';
 import { MobileSidebar } from '@/components/dashboard/mobile-sidebar';
 import { NewTransactionModal } from '@/components/dashboard/new-transaction-modal';
-import { Button } from "@/components/ui/button"; // Import do Button para o sino
+import { NotificationBell } from "@/components/dashboard/notifications/notification-bell"; // <--- NOVO
+import { getNotifications } from "@/app/dashboard/actions"; // <--- NOVO
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await getServerSession(authOptions);
@@ -40,14 +40,17 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   const currentWorkspaceId = workspaces.find(w => w.id === activeWorkspaceId) ? activeWorkspaceId : workspaces[0].id;
 
+  // Buscas de dados
   const rawAccounts = await prisma.bankAccount.findMany({ where: { workspaceId: currentWorkspaceId }, orderBy: { name: 'asc' } });
   const accounts = rawAccounts.map(acc => ({ ...acc, balance: Number(acc.balance) }));
 
   const rawCards = await prisma.creditCard.findMany({ where: { workspaceId: currentWorkspaceId }, orderBy: { name: 'asc' } });
   const cards = rawCards.map(card => ({ ...card, limit: Number(card.limit) }));
 
+  // BUSCA NOTIFICAÇÕES
+  const notifications = await getNotifications();
+
   return (
-    // AQUI MUDOU: bg-background text-foreground (em vez de cores fixas)
     <div className="min-h-screen bg-background text-foreground font-sans flex overflow-hidden">
       
       <aside className="hidden lg:flex w-72 flex-col fixed h-full z-30 border-r border-border">
@@ -61,7 +64,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
       </aside>
 
       <div className="flex-1 lg:ml-72 flex flex-col min-h-screen">
-        {/* Header com fundo dinâmico */}
         <header className="h-16 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-20 flex items-center justify-between px-4 lg:px-8">
            
            <MobileSidebar 
@@ -83,10 +85,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
             </div>
 
             <div className="flex items-center gap-4">
-               <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground">
-                 <Bell className="w-5 h-5" />
-                 <span className="absolute top-3 right-3 w-2 h-2 bg-red-500 rounded-full"></span>
-               </Button>
+               {/* AQUI ENTRA O SINO INTELIGENTE */}
+               <NotificationBell notifications={notifications} />
                
                <NewTransactionModal accounts={accounts} cards={cards} />
             </div>

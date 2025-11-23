@@ -7,6 +7,7 @@ import { Trash2, Loader2, Pencil, ExternalLink } from "lucide-react";
 import { deleteBudget } from "@/app/dashboard/actions";
 import { EditBudgetModal } from "./edit-budget-modal";
 import Link from "next/link";
+import { toast } from "sonner";
 
 interface BudgetCardProps {
   budget: {
@@ -38,8 +39,14 @@ export function BudgetCard({ budget }: BudgetCardProps) {
   const handleDelete = async () => {
     if (!confirm("Tem certeza que deseja excluir este orçamento?")) return;
     setIsLoading(true);
-    await deleteBudget(budget.id);
+    const result = await deleteBudget(budget.id);
     setIsLoading(false);
+
+    if (result?.error) {
+        toast.error("Erro ao excluir", { description: result.error });
+    } else {
+        toast.success("Orçamento removido.");
+    }
   };
 
   const detailsUrl = `/dashboard/transactions?categoryId=${budget.categoryId}&from=${budget.dateFrom}&to=${budget.dateTo}`;

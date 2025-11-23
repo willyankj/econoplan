@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PieChart, Loader2, Plus } from "lucide-react";
 import { createBudget } from '@/app/dashboard/actions';
+import { toast } from "sonner";
 
 export function NewBudgetModal({ categories }: { categories: any[] }) {
   const [open, setOpen] = useState(false);
@@ -17,9 +18,17 @@ export function NewBudgetModal({ categories }: { categories: any[] }) {
     event.preventDefault();
     setIsLoading(true);
     const formData = new FormData(event.currentTarget);
-    await createBudget(formData);
+    
+    const result = await createBudget(formData);
+    
     setIsLoading(false);
-    setOpen(false);
+    
+    if (result?.error) {
+        toast.error("Sem permissão", { description: result.error });
+    } else {
+        toast.success("Orçamento definido!");
+        setOpen(false);
+    }
   }
 
   return (
@@ -38,7 +47,6 @@ export function NewBudgetModal({ categories }: { categories: any[] }) {
         </DialogHeader>
         
         <form onSubmit={handleSubmit} className="grid gap-4 py-4">
-          
           <div className="grid gap-2">
             <Label>Categoria</Label>
             <Select name="categoryId" required>

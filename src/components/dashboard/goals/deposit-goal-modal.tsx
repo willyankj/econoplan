@@ -17,12 +17,12 @@ interface DepositModalProps {
     targetAmount: number; 
     currentAmount: number;
   };
-  // Accounts pode ter propriedade extra 'workspaceName' na visão geral
   accounts: (any & { workspaceName?: string })[]; 
   type: 'DEPOSIT' | 'WITHDRAW';
+  disabled?: boolean; // <--- NOVO: Propriedade para desabilitar o botão
 }
 
-export function DepositGoalModal({ goal, accounts, type }: DepositModalProps) {
+export function DepositGoalModal({ goal, accounts, type, disabled = false }: DepositModalProps) {
   const [open, setOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [amount, setAmount] = useState('');
@@ -46,13 +46,18 @@ export function DepositGoalModal({ goal, accounts, type }: DepositModalProps) {
     setAccountId('');
   }
 
+  // Certifica-se de que a conta não tem saldo para depósito/resgate
+  const isAccountListEmpty = accounts.length === 0;
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
+        {/* Adicionado 'disabled' e ajustada a cor para WITHDRAW */}
         <Button 
             variant="outline" 
             size="sm" 
-            className={`w-full ${type === 'DEPOSIT' ? "text-emerald-500 border-emerald-500/20 hover:bg-emerald-500/10" : "text-muted-foreground hover:text-foreground"}`}
+            className={`w-full ${type === 'DEPOSIT' ? "text-emerald-500 border-emerald-500/20 hover:bg-emerald-500/10" : "text-muted-foreground border-border hover:bg-muted/30"}`}
+            disabled={disabled || isAccountListEmpty}
         >
             {type === 'DEPOSIT' ? 'Guardar' : 'Resgatar'}
         </Button>
@@ -68,12 +73,12 @@ export function DepositGoalModal({ goal, accounts, type }: DepositModalProps) {
         <div className="grid gap-4 py-4">
           <div className="grid gap-2">
             <Label>{type === 'DEPOSIT' ? 'Tirar dinheiro de:' : 'Enviar dinheiro para:'}</Label>
-            <Select value={accountId} onValueChange={setAccountId}>
+            <Select value={accountId} onValueChange={setAccountId} required>
               <SelectTrigger className="bg-muted border-border text-foreground">
                 <SelectValue placeholder="Selecione a conta..." />
               </SelectTrigger>
               <SelectContent className="bg-card border-border text-card-foreground">
-                {accounts.length === 0 ? (
+                {isAccountListEmpty ? (
                     <SelectItem value="none" disabled>Nenhuma conta disponível</SelectItem>
                 ) : (
                     accounts.map((acc) => (
@@ -85,7 +90,6 @@ export function DepositGoalModal({ goal, accounts, type }: DepositModalProps) {
                             
                             <span className="truncate">
                                 {acc.name}
-                                {/* Exibe o nome do workspace se for uma meta compartilhada */}
                                 {acc.workspaceName && (
                                     <span className="text-xs text-muted-foreground ml-1">({acc.workspaceName})</span>
                                 )}
@@ -111,6 +115,9 @@ export function DepositGoalModal({ goal, accounts, type }: DepositModalProps) {
                 className="bg-muted border-border text-foreground text-lg font-bold placeholder:text-muted-foreground"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
+                required
+                min={type === 'WITHDRAW' ? 0.01 : 0}
+                max={type === 'WITHDRAW' ? goal.currentAmount : undefined}
             />
           </div>
 

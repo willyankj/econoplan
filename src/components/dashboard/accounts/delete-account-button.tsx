@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Button } from "@/components/ui/button";
 import { Trash2, Loader2, AlertTriangle } from "lucide-react";
 import { deleteAccount } from '@/app/dashboard/actions';
+import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
@@ -25,9 +26,15 @@ export function DeleteAccountButton({ id, name }: DeleteAccountButtonProps) {
 
   const handleDelete = async () => {
     setIsLoading(true);
-    await deleteAccount(id);
+    const result = await deleteAccount(id);
     setIsLoading(false);
-    setOpen(false);
+
+    if (result?.error) {
+        toast.error("Acesso Negado", { description: result.error });
+    } else {
+        toast.success("Conta excluída com sucesso.");
+        setOpen(false);
+    }
   };
 
   return (
@@ -38,7 +45,6 @@ export function DeleteAccountButton({ id, name }: DeleteAccountButtonProps) {
         </Button>
       </DialogTrigger>
       
-      {/* CORES CORRIGIDAS */}
       <DialogContent className="bg-card border-border text-card-foreground sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle className="text-foreground flex items-center gap-2">
@@ -55,13 +61,8 @@ export function DeleteAccountButton({ id, name }: DeleteAccountButtonProps) {
             ⚠️ Atenção: Esta ação é irreversível!
           </p>
           <p>
-            Ao confirmar, o sistema apagará automaticamente:
+            Ao confirmar, o sistema apagará automaticamente todo o histórico de receitas e despesas desta conta.
           </p>
-          <ul className="list-disc list-inside ml-2 opacity-90">
-            <li>Todo o histórico de receitas desta conta;</li>
-            <li>Todas as despesas lançadas nesta conta;</li>
-            <li>O saldo atual será perdido.</li>
-          </ul>
         </div>
 
         <DialogFooter className="gap-2 sm:gap-0">

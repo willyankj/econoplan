@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Loader2 } from "lucide-react";
 import { inviteMember } from "@/app/dashboard/actions";
+import { toast } from "sonner";
 
 interface InviteMemberFormProps {
   workspaces: { id: string; name: string }[];
@@ -19,14 +20,21 @@ export function InviteMemberForm({ workspaces }: InviteMemberFormProps) {
     event.preventDefault();
     setIsLoading(true);
     const formData = new FormData(event.currentTarget);
-    await inviteMember(formData);
+    
+    const result = await inviteMember(formData);
+    
     setIsLoading(false);
-    const form = event.target as HTMLFormElement;
-    form.reset();
+    
+    if (result?.error) {
+        toast.error("Acesso Negado", { description: result.error });
+    } else {
+        toast.success("Convite enviado/atualizado com sucesso.");
+        const form = event.target as HTMLFormElement;
+        form.reset();
+    }
   }
 
   return (
-    // CORREÇÃO: bg-muted/40, border-border
     <div className="bg-muted/40 p-4 rounded-lg border border-border shadow-sm">
       <h4 className="text-sm font-medium text-foreground mb-3 flex items-center gap-2">
           <Plus className="w-4 h-4" /> Convidar Novo Membro
@@ -40,7 +48,6 @@ export function InviteMemberForm({ workspaces }: InviteMemberFormProps) {
                 name="email" 
                 type="email" 
                 placeholder="usuario@gmail.com" 
-                // CORREÇÃO: bg-background, text-foreground, border-input
                 className="bg-background border-input text-foreground h-9 text-sm placeholder:text-muted-foreground" 
                 required 
               />
@@ -52,7 +59,6 @@ export function InviteMemberForm({ workspaces }: InviteMemberFormProps) {
                   <SelectTrigger className="bg-background border-input text-foreground h-9">
                     <SelectValue placeholder="Selecione..." />
                   </SelectTrigger>
-                  {/* CORREÇÃO: bg-popover */}
                   <SelectContent className="bg-popover border-border text-popover-foreground">
                       {workspaces.map(ws => (
                         <SelectItem key={ws.id} value={ws.id}>{ws.name}</SelectItem>
