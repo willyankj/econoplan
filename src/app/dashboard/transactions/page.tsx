@@ -14,6 +14,7 @@ import { SearchInput } from "./search-input";
 import { ExportButton } from "./export-button";
 import { BankLogo } from "@/components/ui/bank-logo";
 import { getUserWorkspace } from "@/lib/get-user-workspace"; // Importante
+import { ImportTransactionsModal } from "@/components/dashboard/transactions/import-modal"; // Importar
 
 export const dynamic = 'force-dynamic';
 
@@ -87,12 +88,15 @@ export default async function TransactionsPage({
             {transactions.length} lançamento(s) encontrado(s)
           </p>
         </div>
-        <div className="flex gap-2 w-full md:w-auto">
-          {!params.cardId && 
-            <TransactionFilterButton accounts={accounts} cards={cards} categories={categories} />
-          }
-          <ExportButton data={transactionsForExport} />
-        </div>
+          <div className="flex gap-2 w-full md:w-auto">
+            {!params.cardId && 
+              <>
+                <ImportTransactionsModal accounts={accounts} /> {/* ADICIONADO AQUI */}
+                <TransactionFilterButton accounts={accounts} cards={cards} categories={categories} />
+              </>
+            }
+            <ExportButton data={transactionsForExport} />
+          </div>
       </div>
 
       <Card className="bg-card border-border shadow-sm overflow-hidden mx-1">

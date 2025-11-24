@@ -1,10 +1,10 @@
 import { prisma } from "@/lib/prisma";
 import { NewBudgetModal } from "@/components/dashboard/budgets/new-budget-modal";
 import { BudgetCard } from "@/components/dashboard/budgets/budget-card";
-import { PieChart, ChevronLeft, ChevronRight } from "lucide-react";
+import { PieChart, ChevronLeft, ChevronRight, Target } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { getUserWorkspace } from "@/lib/get-user-workspace"; // Importante
+import { getUserWorkspace } from "@/lib/get-user-workspace";
 
 export const dynamic = 'force-dynamic';
 
@@ -13,13 +13,10 @@ export default async function BudgetsPage({
 }: {
   searchParams: Promise<{ month?: string }>
 }) {
-  // CORREÇÃO: Workspace ativo
   const { workspaceId } = await getUserWorkspace();
   if (!workspaceId) return <div>Selecione um workspace</div>;
 
   const params = await searchParams;
-
-  // Lógica de Mês
   const now = new Date();
   let currentDate = now;
   
@@ -31,51 +28,27 @@ export default async function BudgetsPage({
   const firstDay = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
   const lastDay = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
 
-  // Navegação
-  const prevMonth = new Date(currentDate);
-  prevMonth.setMonth(prevMonth.getMonth() - 1);
+  const prevMonth = new Date(currentDate); prevMonth.setMonth(prevMonth.getMonth() - 1);
   const prevMonthStr = prevMonth.toISOString().slice(0, 7);
-
-  const nextMonth = new Date(currentDate);
-  nextMonth.setMonth(nextMonth.getMonth() + 1);
+  const nextMonth = new Date(currentDate); nextMonth.setMonth(nextMonth.getMonth() + 1);
   const nextMonthStr = nextMonth.toISOString().slice(0, 7);
-
   const monthLabel = currentDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
 
-  const categories = await prisma.category.findMany({
-    where: { workspaceId, type: 'EXPENSE' },
-    orderBy: { name: 'asc' }
-  });
-
-  const budgets = await prisma.budget.findMany({
-    where: { workspaceId },
-    include: { category: true }
-  });
-
+  const categories = await prisma.category.findMany({ where: { workspaceId, type: 'EXPENSE' }, orderBy: { name: 'asc' } });
+  const budgets = await prisma.budget.findMany({ where: { workspaceId }, include: { category: true } });
   const expenses = await prisma.transaction.findMany({
-    where: {
-      workspaceId,
-      type: 'EXPENSE',
-      date: { gte: firstDay, lte: lastDay }
-    }
+    where: { workspaceId, type: 'EXPENSE', date: { gte: firstDay, lte: lastDay } }
   });
 
   const expensesByCategory: Record<string, number> = {};
   expenses.forEach(t => {
-    if (t.categoryId) {
-        const current = expensesByCategory[t.categoryId] || 0;
-        expensesByCategory[t.categoryId] = current + Number(t.amount);
-    }
+    if (t.categoryId) expensesByCategory[t.categoryId] = (expensesByCategory[t.categoryId] || 0) + Number(t.amount);
   });
 
   const budgetData = budgets.map(b => ({
-    id: b.id,
-    categoryId: b.categoryId,
-    categoryName: b.category?.name || 'Sem categoria',
-    target: Number(b.targetAmount),
-    spent: expensesByCategory[b.categoryId || ''] || 0,
-    dateFrom: firstDay.toISOString().split('T')[0],
-    dateTo: lastDay.toISOString().split('T')[0]
+    id: b.id, categoryId: b.categoryId, categoryName: b.category?.name || 'Sem categoria',
+    target: Number(b.targetAmount), spent: expensesByCategory[b.categoryId || ''] || 0,
+    dateFrom: firstDay.toISOString().split('T')[0], dateTo: lastDay.toISOString().split('T')[0]
   }));
 
   return (
@@ -99,11 +72,17 @@ export default async function BudgetsPage({
         <NewBudgetModal categories={categories} />
       </div>
 
+      {/* --- ESTADO VAZIO EXCLUSIVO (ORÇAMENTOS) --- */}
       {budgetData.length === 0 ? (
-         <div className="flex flex-col items-center justify-center p-12 border-2 border-dashed border-border rounded-xl text-muted-foreground">
-            <PieChart className="w-12 h-12 mb-4 opacity-50" />
-            <p>Nenhum orçamento definido.</p>
-            <p className="text-sm">Clique em "Definir Orçamento" para começar.</p>
+         <div className="flex flex-col items-center justify-center p-16 border border-rose-500/20 rounded-xl bg-gradient-to-b from-rose-500/5 to-transparent text-muted-foreground">
+            <div className="p-5 bg-rose-100 dark:bg-rose-900/30 rounded-full mb-5 animate-pulse">
+                <PieChart className="w-12 h-12 text-rose-500" />
+            </div>
+            <h3 className="text-lg font-bold text-foreground mb-2">Planeje seus Gastos</h3>
+            <p className="text-sm max-w-md text-center mb-6">
+                Defina um teto para categorias como "Mercado" ou "Lazer" e o Econoplan te avisa antes do dinheiro acabar.
+            </p>
+            <NewBudgetModal categories={categories} />
          </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

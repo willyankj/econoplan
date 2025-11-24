@@ -54,7 +54,11 @@ export function BudgetCard({ budget }: BudgetCardProps) {
   return (
     <>
       <Card className="relative overflow-hidden bg-card border-border shadow-sm hover:border-primary/50 transition-all group">
-        <CardHeader className="flex flex-row items-center justify-between pb-2">
+        
+        {/* --- BACKGROUND SHAPE (GRADIENTE ROXO/VIOLETA) --- */}
+        <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-purple-500/20 to-transparent rounded-bl-full -mr-6 -mt-6 pointer-events-none" />
+
+        <CardHeader className="flex flex-row items-center justify-between pb-2 relative z-10">
           <CardTitle className="text-base font-medium text-foreground flex items-center gap-2">
              {budget.categoryName}
              <Link href={detailsUrl}>
@@ -74,7 +78,7 @@ export function BudgetCard({ budget }: BudgetCardProps) {
           </div>
         </CardHeader>
         
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-4 relative z-10">
           <div className="flex justify-between items-end">
               <div>
                   <p className="text-2xl font-bold text-foreground">{formatCurrency(budget.spent)}</p>

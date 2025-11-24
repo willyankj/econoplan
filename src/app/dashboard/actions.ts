@@ -7,6 +7,39 @@ import { revalidatePath } from "next/cache";
 import { cookies } from 'next/headers';
 import { checkPermission } from "@/lib/permissions";
 import { createAuditLog } from "@/lib/audit";
+import { z } from "zod";
+
+// === SCHEMAS DE VALIDAÇÃO (ZOD) ===
+const TransactionSchema = z.object({
+  description: z.string().min(1, "Descrição obrigatória"),
+  amount: z.coerce.number().positive("Valor deve ser positivo"),
+  type: z.enum(["INCOME", "EXPENSE"]),
+  date: z.string().min(10),
+  category: z.string().min(1, "Categoria obrigatória"),
+  paymentMethod: z.enum(["ACCOUNT", "CREDIT_CARD"]),
+  accountId: z.string().optional(),
+  cardId: z.string().optional(),
+});
+
+const AccountSchema = z.object({
+  name: z.string().min(1, "Nome obrigatório"),
+  bank: z.string().min(1, "Banco obrigatório"),
+  balance: z.coerce.number(),
+});
+
+// === HELPER: Resolver Workspace Seguro ===
+// Evita erros de FK se o cookie tiver um ID de workspace deletado
+function resolveWorkspaceId(user: any, cookieStore: any) {
+    if (!user.workspaces || user.workspaces.length === 0) return null;
+
+    const cookieId = cookieStore.get('activeWorkspaceId')?.value;
+    
+    // Verifica se o ID do cookie realmente pertence ao usuário
+    const isValid = user.workspaces.some((w: any) => w.workspaceId === cookieId);
+
+    // Se for válido, usa ele. Se não (ex: deletado), usa o primeiro da lista (Default)
+    return isValid ? cookieId : user.workspaces[0].workspaceId;
+}
 
 // ============================================================================
 // 1. GESTÃO DO TENANT, WORKSPACE E MEMBROS
@@ -188,7 +221,7 @@ export async function removeMember(userId: string) {
         include: { tenant: true }
     });
 
-    if (!currentUser) return { error: "Erro usuário" }; // FIX
+    if (!currentUser) return { error: "Erro usuário" };
 
     if (!checkPermission(currentUser.role, currentUser.tenant.settings, 'org_invite')) {
         return { error: "Sem permissão." };
@@ -236,7 +269,7 @@ export async function deleteWorkspace(workspaceId: string) {
     if (!session?.user?.email) return { error: "Não autorizado" };
     const currentUser = await prisma.user.findUnique({ where: { email: session.user.email }, include: { tenant: true } });
 
-    if (!currentUser) return { error: "Erro usuário" }; // FIX
+    if (!currentUser) return { error: "Erro usuário" };
 
     if (!checkPermission(currentUser.role, currentUser.tenant.settings, 'org_manage_workspaces')) {
         return { error: "Sem permissão." };
@@ -295,36 +328,45 @@ export async function createTransaction(formData: FormData) {
   if (!checkPermission(user.role, user.tenant.settings, 'transactions_create')) {
       return { error: "Sem permissão para criar lançamentos." };
   }
+
+  const parsed = TransactionSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+      return { error: "Dados inválidos: " + parsed.error.issues[0].message };
+  }
+  const data = parsed.data;
   
+  // CORREÇÃO AQUI: Uso do Helper
   const cookieStore = await cookies();
-  const activeWorkspaceId = cookieStore.get('activeWorkspaceId')?.value;
-  const workspaceId = activeWorkspaceId || user.workspaces[0].workspaceId;
-  const description = formData.get("description") as string;
-  const amount = parseFloat(formData.get("amount") as string);
-  const type = formData.get("type") as "INCOME" | "EXPENSE";
-  const dateString = formData.get("date") as string;
-  const date = new Date(dateString + "T12:00:00"); 
-  const categoryName = formData.get("category") as string;
-  const paymentMethod = formData.get("paymentMethod") as "ACCOUNT" | "CREDIT_CARD";
+  const workspaceId = resolveWorkspaceId(user, cookieStore);
+  
+  if (!workspaceId) return { error: "Nenhum workspace disponível." };
+  
+  const date = new Date(data.date + "T12:00:00"); 
 
-  const category = await prisma.category.upsert({ where: { workspaceId_name: { workspaceId, name: categoryName } }, update: {}, create: { name: categoryName, type, workspaceId } });
+  const category = await prisma.category.upsert({ 
+      where: { workspaceId_name: { workspaceId, name: data.category } }, 
+      update: {}, 
+      create: { name: data.category, type: data.type, workspaceId } 
+  });
 
-  if (paymentMethod === "ACCOUNT") {
-    const accountId = formData.get("accountId") as string;
-    await prisma.transaction.create({ data: { description, amount, type, date, workspaceId, bankAccountId: accountId, categoryId: category.id, isPaid: true } });
-    if (type === 'INCOME') await prisma.bankAccount.update({ where: { id: accountId }, data: { balance: { increment: amount } } });
-    else await prisma.bankAccount.update({ where: { id: accountId }, data: { balance: { decrement: amount } } });
+  if (data.paymentMethod === "ACCOUNT") {
+    if (!data.accountId) return { error: "Conta não informada" };
+    await prisma.transaction.create({ 
+        data: { description: data.description, amount: data.amount, type: data.type, date, workspaceId, bankAccountId: data.accountId, categoryId: category.id, isPaid: true } 
+    });
+    if (data.type === 'INCOME') await prisma.bankAccount.update({ where: { id: data.accountId }, data: { balance: { increment: data.amount } } });
+    else await prisma.bankAccount.update({ where: { id: data.accountId }, data: { balance: { decrement: data.amount } } });
   } 
   else {
-    const cardId = formData.get("cardId") as string;
-    await prisma.transaction.create({ data: { description, amount, type, date, workspaceId, creditCardId: cardId, categoryId: category.id, isPaid: false } });
+    if (!data.cardId) return { error: "Cartão não informado" };
+    await prisma.transaction.create({ 
+        data: { description: data.description, amount: data.amount, type: data.type, date, workspaceId, creditCardId: data.cardId, categoryId: category.id, isPaid: false } 
+    });
   }
 
-  // TRADUÇÃO PARA O LOG
-  const typePT = type === 'INCOME' ? 'Receita' : 'Despesa';
-
+  const typePT = data.type === 'INCOME' ? 'Receita' : 'Despesa';
   await createAuditLog({
-      tenantId: user.tenantId, userId: user.id, action: 'CREATE', entity: 'Transaction', details: `${typePT}: ${description} (R$ ${amount})`
+      tenantId: user.tenantId, userId: user.id, action: 'CREATE', entity: 'Transaction', details: `${typePT}: ${data.description} (R$ ${data.amount})`
   });
 
   revalidatePath('/dashboard'); revalidatePath('/dashboard/transactions'); revalidatePath('/dashboard/cards'); revalidatePath('/dashboard/accounts'); revalidatePath('/dashboard/organization');
@@ -336,7 +378,6 @@ export async function updateTransaction(id: string, formData: FormData) {
   if (!session?.user?.email) return { error: "Não autorizado" };
   const user = await prisma.user.findUnique({ where: { email: session.user.email }, include: { tenant: true } });
   
-  // FIX: Verificação de usuário nulo
   if (!user) return { error: "Usuário não encontrado" };
   
   if (!checkPermission(user.role, user.tenant.settings, 'transactions_edit')) return { error: "Sem permissão." };
@@ -378,25 +419,37 @@ export async function deleteTransaction(id: string) {
       include: { tenant: true }
   });
   
-  // FIX: Verificação de usuário nulo
   if (!user) return { error: "Erro usuário" };
 
   if (!checkPermission(user.role, user.tenant.settings, 'transactions_delete')) {
       return { error: "Sem permissão para excluir transações." };
   }
 
-  const transaction = await prisma.transaction.findUnique({ where: { id } });
-  if (!transaction) return { error: "Erro" };
+  try {
+      await prisma.$transaction(async (tx) => {
+          const transaction = await tx.transaction.findUnique({ where: { id } });
+          if (!transaction) throw new Error("Transação não encontrada");
 
-  if (transaction.bankAccountId && transaction.isPaid) {
-    if (transaction.type === 'INCOME') await prisma.bankAccount.update({ where: { id: transaction.bankAccountId }, data: { balance: { decrement: transaction.amount } } });
-    else await prisma.bankAccount.update({ where: { id: transaction.bankAccountId }, data: { balance: { increment: transaction.amount } } });
+          if (transaction.bankAccountId && transaction.isPaid) {
+            if (transaction.type === 'INCOME') {
+                await tx.bankAccount.update({ where: { id: transaction.bankAccountId }, data: { balance: { decrement: transaction.amount } } });
+            } else {
+                await tx.bankAccount.update({ where: { id: transaction.bankAccountId }, data: { balance: { increment: transaction.amount } } });
+            }
+          }
+          
+          await tx.transaction.delete({ where: { id } });
+
+          await tx.auditLog.create({
+             data: {
+                tenantId: user.tenantId, userId: user.id, action: 'DELETE', entity: 'Transaction', 
+                details: `Apagou: ${transaction.description}`
+             }
+          });
+      });
+  } catch (e) {
+      return { error: "Erro ao excluir transação." };
   }
-  await prisma.transaction.delete({ where: { id } });
-
-  await createAuditLog({
-      tenantId: user.tenantId, userId: user.id, action: 'DELETE', entity: 'Transaction', details: `Apagou: ${transaction.description}`
-  });
 
   revalidatePath('/dashboard'); revalidatePath('/dashboard/transactions'); revalidatePath('/dashboard/cards'); revalidatePath('/dashboard/organization');
   return { success: true };
@@ -411,20 +464,24 @@ export async function createAccount(formData: FormData) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) return { error: "Não autorizado" };
   const user = await prisma.user.findUnique({ where: { email: session.user.email }, include: { workspaces: true, tenant: true } });
-
-  // FIX: Verificação de usuário nulo
   if (!user) return { error: "Erro de usuário" };
 
   if (!checkPermission(user.role, user.tenant.settings, 'accounts_create')) return { error: "Sem permissão." };
   
+  const parsed = AccountSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+      return { error: "Dados inválidos: " + parsed.error.issues[0].message };
+  }
+  const { name, bank, balance } = parsed.data;
+
+  // CORREÇÃO AQUI: Uso do Helper
   const cookieStore = await cookies();
-  const activeWorkspaceId = cookieStore.get('activeWorkspaceId')?.value;
-  const workspaceId = activeWorkspaceId || user.workspaces[0].workspaceId;
-  const name = formData.get("name") as string;
-  const bank = formData.get("bank") as string;
+  const workspaceId = resolveWorkspaceId(user, cookieStore);
+  
+  if (!workspaceId) return { error: "Nenhum workspace disponível." };
 
   await prisma.bankAccount.create({
-    data: { name, bank, balance: parseFloat(formData.get("balance") as string) || 0, workspaceId, isIncluded: true }
+    data: { name, bank, balance, workspaceId, isIncluded: true }
   });
 
   await createAuditLog({
@@ -440,7 +497,6 @@ export async function updateAccount(id: string, formData: FormData) {
   if (!session?.user?.email) return { error: "Não autorizado" };
   const user = await prisma.user.findUnique({ where: { email: session.user.email }, include: { tenant: true } });
   
-  // FIX: Verificação de usuário nulo
   if (!user) return { error: "Erro de usuário" };
   
   if (!checkPermission(user.role, user.tenant.settings, 'accounts_edit')) return { error: "Sem permissão." };
@@ -463,17 +519,27 @@ export async function deleteAccount(id: string) {
   if (!session?.user?.email) return { error: "Não autorizado" };
   const user = await prisma.user.findUnique({ where: { email: session.user.email }, include: { tenant: true } });
   
-  // FIX: Verificação de usuário nulo
   if (!user) return { error: "Erro de usuário" };
 
   if (!checkPermission(user.role, user.tenant.settings, 'accounts_delete')) return { error: "Sem permissão para excluir contas." };
 
-  const acc = await prisma.bankAccount.findUnique({ where: { id } });
-  await prisma.bankAccount.delete({ where: { id } });
+  try {
+      await prisma.$transaction(async (tx) => {
+          const acc = await tx.bankAccount.findUnique({ where: { id } });
+          if (!acc) throw new Error("Conta não encontrada");
+          
+          await tx.bankAccount.delete({ where: { id } });
 
-  await createAuditLog({
-      tenantId: user.tenantId, userId: user.id, action: 'DELETE', entity: 'Account', details: `Apagou conta: ${acc?.name}`
-  });
+          await tx.auditLog.create({
+              data: {
+                  tenantId: user.tenantId, userId: user.id, action: 'DELETE', entity: 'Account', 
+                  details: `Apagou conta: ${acc.name}`
+              }
+          });
+      });
+  } catch (e) {
+      return { error: "Erro ao excluir conta." };
+  }
 
   revalidatePath('/dashboard/accounts'); revalidatePath('/dashboard'); revalidatePath('/dashboard/organization');
   return { success: true };
@@ -489,14 +555,16 @@ export async function createCreditCard(formData: FormData) {
   if (!session?.user?.email) return { error: "Não autorizado" };
   const user = await prisma.user.findUnique({ where: { email: session.user.email }, include: { workspaces: true, tenant: true } });
   
-  // FIX: Verificação de usuário nulo
   if (!user) return { error: "Erro de usuário" };
   
   if (!checkPermission(user.role, user.tenant.settings, 'cards_create')) return { error: "Seu perfil não tem permissão." };
 
+  // CORREÇÃO CRÍTICA AQUI: Uso do Helper para evitar ID deletado do cookie
   const cookieStore = await cookies();
-  const activeWorkspaceId = cookieStore.get('activeWorkspaceId')?.value;
-  const workspaceId = activeWorkspaceId || user.workspaces[0].workspaceId;
+  const workspaceId = resolveWorkspaceId(user, cookieStore);
+  
+  if (!workspaceId) return { error: "Nenhum workspace disponível." };
+
   const name = formData.get("name") as string;
 
   await prisma.creditCard.create({
@@ -516,7 +584,6 @@ export async function updateCreditCard(id: string, formData: FormData) {
   if (!session?.user?.email) return { error: "Não autorizado" };
   const user = await prisma.user.findUnique({ where: { email: session.user.email }, include: { tenant: true } });
   
-  // FIX: Verificação de usuário nulo
   if (!user) return { error: "Erro de usuário" };
 
   if (!checkPermission(user.role, user.tenant.settings, 'cards_edit')) return { error: "Sem permissão." };
@@ -539,7 +606,6 @@ export async function deleteCreditCard(id: string) {
   if (!session?.user?.email) return { error: "Não autorizado" };
   const user = await prisma.user.findUnique({ where: { email: session.user.email }, include: { tenant: true } });
   
-  // FIX: Verificação de usuário nulo
   if (!user) return { error: "Erro de usuário" };
 
   if (!checkPermission(user.role, user.tenant.settings, 'cards_delete')) return { error: "Sem permissão." };
@@ -560,7 +626,6 @@ export async function payCreditCardInvoice(formData: FormData) {
   if (!session?.user?.email) return { error: "Não autorizado" };
   const user = await prisma.user.findUnique({ where: { email: session.user.email }, include: { tenant: true } });
   
-  // FIX: Verificação de usuário nulo
   if (!user) return { error: "Erro de usuário" };
 
   if (!checkPermission(user.role, user.tenant.settings, 'cards_pay')) return { error: "Sem permissão para pagar." };
@@ -597,14 +662,16 @@ export async function createBudget(formData: FormData) {
   if (!session?.user?.email) return { error: "Não autorizado" };
   const user = await prisma.user.findUnique({ where: { email: session.user.email }, include: { workspaces: true, tenant: true } });
 
-  // FIX: Verificação de usuário nulo
   if (!user) return { error: "Erro de usuário" };
 
   if (!checkPermission(user.role, user.tenant.settings, 'budgets_create')) return { error: "Sem permissão." };
 
+  // CORREÇÃO AQUI: Uso do Helper
   const cookieStore = await cookies();
-  const activeWorkspaceId = cookieStore.get('activeWorkspaceId')?.value;
-  const workspaceId = activeWorkspaceId || user.workspaces[0].workspaceId;
+  const workspaceId = resolveWorkspaceId(user, cookieStore);
+  
+  if (!workspaceId) return { error: "Nenhum workspace disponível." };
+
   const categoryId = formData.get("categoryId") as string;
   const amount = parseFloat(formData.get("amount") as string);
   
@@ -623,7 +690,6 @@ export async function updateBudget(id: string, formData: FormData) {
   if (!session?.user?.email) return { error: "Não autorizado" };
   const user = await prisma.user.findUnique({ where: { email: session.user.email }, include: { tenant: true } });
   
-  // FIX: Verificação de usuário nulo
   if (!user) return { error: "Erro de usuário" };
 
   if (!checkPermission(user.role, user.tenant.settings, 'budgets_edit')) return { error: "Sem permissão." };
@@ -644,7 +710,6 @@ export async function deleteBudget(id: string) {
   if (!session?.user?.email) return { error: "Não autorizado" };
   const user = await prisma.user.findUnique({ where: { email: session.user.email }, include: { tenant: true } });
   
-  // FIX: Verificação de usuário nulo
   if (!user) return { error: "Erro de usuário" };
 
   if (!checkPermission(user.role, user.tenant.settings, 'budgets_delete')) return { error: "Sem permissão." };
@@ -669,12 +734,14 @@ export async function createGoal(formData: FormData) {
   if (!session?.user?.email) return { error: "Não autorizado" };
   const user = await prisma.user.findUnique({ where: { email: session.user.email }, include: { workspaces: true, tenant: true } });
   
-  // FIX: Verificação de usuário nulo
   if (!user) return { error: "Erro de usuário" };
 
+  // CORREÇÃO AQUI: Uso do Helper
   const cookieStore = await cookies();
-  const activeWorkspaceId = cookieStore.get('activeWorkspaceId')?.value;
-  const workspaceId = activeWorkspaceId || user.workspaces[0].workspaceId;
+  const workspaceId = resolveWorkspaceId(user, cookieStore);
+  
+  if (!workspaceId) return { error: "Nenhum workspace disponível." };
+
   const name = formData.get("name") as string;
 
   await prisma.goal.create({
@@ -829,4 +896,107 @@ export async function markAllNotificationsAsRead() {
     if (!user) return;
     await prisma.notification.updateMany({ where: { userId: user.id, read: false }, data: { read: true } });
     revalidatePath('/dashboard');
+}
+
+// ============================================================================
+// 8. IMPORTAÇÃO (EXTRATOS) - ATUALIZADO
+// ============================================================================
+
+export async function importTransactions(
+  accountId: string, 
+  transactions: { date: string; amount: number; description: string; category?: string }[]
+) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.email) return { error: "Não autorizado" };
+
+  const user = await prisma.user.findUnique({ 
+    where: { email: session.user.email }, 
+    include: { tenant: true } 
+  });
+
+  if (!user) return { error: "Erro de usuário" };
+
+  if (!checkPermission(user.role, user.tenant.settings, 'transactions_create')) {
+      return { error: "Sem permissão para importar." };
+  }
+
+  const account = await prisma.bankAccount.findUnique({ where: { id: accountId } });
+  if (!account) return { error: "Conta não encontrada." };
+
+  let importedCount = 0;
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      for (const t of transactions) {
+        const date = new Date(t.date);
+        
+        const existing = await tx.transaction.findFirst({
+          where: {
+            bankAccountId: accountId,
+            amount: t.amount,
+            date: { equals: date },
+            description: t.description
+          }
+        });
+
+        if (existing) continue;
+
+        // Categoria inteligente
+        const categoryName = t.category && t.category.trim() !== "" ? t.category.trim() : "Importados";
+
+        const category = await tx.category.upsert({
+            where: { workspaceId_name: { workspaceId: account.workspaceId, name: categoryName } },
+            update: {},
+            create: { 
+                name: categoryName, 
+                type: t.amount >= 0 ? 'INCOME' : 'EXPENSE', 
+                workspaceId: account.workspaceId 
+            }
+        });
+
+        const type = t.amount >= 0 ? 'INCOME' : 'EXPENSE';
+        const absAmount = Math.abs(t.amount);
+
+        await tx.transaction.create({
+          data: {
+            description: t.description,
+            amount: absAmount,
+            type,
+            date,
+            workspaceId: account.workspaceId,
+            bankAccountId: accountId,
+            categoryId: category.id,
+            isPaid: true
+          }
+        });
+
+        if (type === 'INCOME') {
+            await tx.bankAccount.update({ where: { id: accountId }, data: { balance: { increment: absAmount } } });
+        } else {
+            await tx.bankAccount.update({ where: { id: accountId }, data: { balance: { decrement: absAmount } } });
+        }
+
+        importedCount++;
+      }
+
+      if (importedCount > 0) {
+        await tx.auditLog.create({
+          data: {
+            tenantId: user.tenantId,
+            userId: user.id,
+            action: 'CREATE',
+            entity: 'Transaction',
+            details: `Importou ${importedCount} transações para ${account.name}`
+          }
+        });
+      }
+    });
+  } catch (error) {
+    console.error("Erro na importação:", error);
+    return { error: "Falha ao processar importação." };
+  }
+
+  revalidatePath('/dashboard/transactions');
+  revalidatePath('/dashboard/accounts');
+  return { success: true, count: importedCount };
 }

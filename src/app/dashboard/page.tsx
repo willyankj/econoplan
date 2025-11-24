@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { DashboardOverview } from "@/components/dashboard/overview";
-import { getUserWorkspace } from "@/lib/get-user-workspace"; // <--- CORREÇÃO
+import { getUserWorkspace } from "@/lib/get-user-workspace";
 
 export const dynamic = 'force-dynamic';
 
@@ -9,17 +9,18 @@ export default async function DashboardPage({
 }: {
   searchParams: Promise<{ chartRange?: string }>
 }) {
-  // 1. Identificar Workspace Ativo Corretamente
   const { workspaceId } = await getUserWorkspace();
   if (!workspaceId) return <div>Selecione um workspace</div>;
 
   const params = await searchParams;
   const chartRange = params.chartRange || '6m';
 
-  // --- 2. DADOS KPI E CONTAS ---
+  // --- DADOS KPI E CONTAS ---
   const rawAccounts = await prisma.bankAccount.findMany({ where: { workspaceId }, orderBy: { name: 'asc' } });
   const accounts = rawAccounts.map(acc => ({ ...acc, balance: Number(acc.balance) }));
-  const totalBalance = accounts.reduce((acc, account) => acc + account.balance, 0);
+  
+  // CORREÇÃO: Soma segura usando inteiros (centavos) para evitar erros de ponto flutuante
+  const totalBalance = accounts.reduce((acc, account) => acc + Math.round(account.balance * 100), 0) / 100;
 
   const now = new Date();
   const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -32,21 +33,21 @@ export default async function DashboardPage({
     }
   });
 
+  // CORREÇÃO: Soma segura usando inteiros
   const monthlyIncome = transactionsMonth
     .filter(t => t.type === 'INCOME' && t.creditCardId === null)
-    .reduce((acc, t) => acc + Number(t.amount), 0);
+    .reduce((acc, t) => acc + Math.round(Number(t.amount) * 100), 0) / 100;
 
   const monthlyExpense = transactionsMonth
     .filter(t => t.type === 'EXPENSE' && t.creditCardId === null)
-    .reduce((acc, t) => acc + Number(t.amount), 0);
+    .reduce((acc, t) => acc + Math.round(Number(t.amount) * 100), 0) / 100;
 
-  // --- 3. DADOS DE ORÇAMENTO (LISTA COMPLETA) ---
+  // --- ORÇAMENTOS ---
   const budgets = await prisma.budget.findMany({ 
       where: { workspaceId },
       include: { category: true }
   });
   
-  // Busca despesas para calcular o progresso de cada orçamento
   const allExpensesMonth = await prisma.transaction.findMany({
     where: {
       workspaceId,
@@ -59,7 +60,10 @@ export default async function DashboardPage({
   const expensesByCategory: Record<string, number> = {};
   allExpensesMonth.forEach(t => {
     if (t.categoryId) {
-        expensesByCategory[t.categoryId] = (expensesByCategory[t.categoryId] || 0) + Number(t.amount);
+        // Soma segura por categoria
+        const currentVal = Math.round(Number(t.amount) * 100);
+        const prevVal = expensesByCategory[t.categoryId] ? Math.round(expensesByCategory[t.categoryId] * 100) : 0;
+        expensesByCategory[t.categoryId] = (prevVal + currentVal) / 100;
     }
   });
 
@@ -70,7 +74,7 @@ export default async function DashboardPage({
       spent: expensesByCategory[b.categoryId || ''] || 0
   }));
 
-  // --- 4. DADOS DE METAS ---
+  // --- METAS ---
   const rawGoals = await prisma.goal.findMany({
     where: { workspaceId },
     orderBy: [ { deadline: 'asc' }, { createdAt: 'desc' } ],
@@ -85,7 +89,7 @@ export default async function DashboardPage({
     transactions: g.transactions.map(t => ({...t, amount: Number(t.amount)}))
   }));
 
-  // --- 5. DADOS DO GRÁFICO ---
+  // --- DADOS DO GRÁFICO ---
   let startDate = new Date();
   const chartMap = new Map();
 
@@ -129,8 +133,17 @@ export default async function DashboardPage({
 
     if (chartMap.has(key)) {
        const entry = chartMap.get(key);
-       if (t.type === 'INCOME') entry.income += Number(t.amount);
-       else entry.expense += Number(t.amount);
+       const val = Math.round(Number(t.amount) * 100); // Centavos
+       
+       // Mantemos em centavos temporariamente
+       const currentInc = Math.round(entry.income * 100);
+       const currentExp = Math.round(entry.expense * 100);
+
+       if (t.type === 'INCOME') {
+           entry.income = (currentInc + val) / 100;
+       } else {
+           entry.expense = (currentExp + val) / 100;
+       }
     }
   });
 
@@ -140,7 +153,7 @@ export default async function DashboardPage({
     monthlyExpense,
     chartData: Array.from(chartMap.values()),
     lastTransactions: [],
-    budgets: budgetList, // <--- ENVIA A LISTA, NÃO O RESUMO
+    budgets: budgetList, 
     goals,
     accounts
   };

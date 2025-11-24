@@ -7,8 +7,8 @@ import { cookies } from 'next/headers';
 import { SidebarUI } from '@/components/dashboard/sidebar-ui';
 import { MobileSidebar } from '@/components/dashboard/mobile-sidebar';
 import { NewTransactionModal } from '@/components/dashboard/new-transaction-modal';
-import { NotificationBell } from "@/components/dashboard/notifications/notification-bell"; // <--- NOVO
-import { getNotifications } from "@/app/dashboard/actions"; // <--- NOVO
+import { NotificationBell } from "@/components/dashboard/notifications/notification-bell";
+import { getNotifications } from "@/app/dashboard/actions";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await getServerSession(authOptions);
@@ -47,13 +47,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const rawCards = await prisma.creditCard.findMany({ where: { workspaceId: currentWorkspaceId }, orderBy: { name: 'asc' } });
   const cards = rawCards.map(card => ({ ...card, limit: Number(card.limit) }));
 
-  // BUSCA NOTIFICAÇÕES
   const notifications = await getNotifications();
 
   return (
-    <div className="min-h-screen bg-background text-foreground font-sans flex overflow-hidden">
+    // MUDANÇA PRINCIPAL: Flex Layout para a tela inteira
+    <div className="flex h-screen overflow-hidden bg-background text-foreground font-sans">
       
-      <aside className="hidden lg:flex w-72 flex-col fixed h-full z-30 border-r border-border">
+      {/* Sidebar Desktop agora é um Flex Item, não Fixed */}
+      <div className="hidden lg:flex h-full z-30 shrink-0">
         <SidebarUI 
             user={user}
             workspaces={workspaces}
@@ -61,11 +62,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
             tenantName={tenantName}
             role={role}
         />
-      </aside>
+      </div>
 
-      <div className="flex-1 lg:ml-72 flex flex-col min-h-screen">
-        <header className="h-16 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-20 flex items-center justify-between px-4 lg:px-8">
-           
+      {/* Conteúdo Principal: Flex-1 para ocupar o resto do espaço */}
+      <div className="flex-1 flex flex-col h-full overflow-hidden relative">
+        
+        {/* Header */}
+        <header className="h-16 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 flex items-center justify-between px-4 lg:px-8 shrink-0">
            <MobileSidebar 
                 user={user}
                 workspaces={workspaces}
@@ -85,15 +88,16 @@ export default async function DashboardLayout({ children }: { children: React.Re
             </div>
 
             <div className="flex items-center gap-4">
-               {/* AQUI ENTRA O SINO INTELIGENTE */}
                <NotificationBell notifications={notifications} />
-               
                <NewTransactionModal accounts={accounts} cards={cards} />
             </div>
         </header>
 
-        <main className="flex-1 p-4 lg:p-8 overflow-y-auto bg-muted/10">
-          {children}
+        {/* Área de Scroll do Conteúdo */}
+        <main className="flex-1 overflow-y-auto bg-muted/10 p-4 lg:p-8 scrollbar-thin">
+          <div className="mx-auto max-w-7xl">
+             {children}
+          </div>
         </main>
       </div>
     </div>

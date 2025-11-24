@@ -2,9 +2,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
-// CORREÇÃO: Adicionado CardDescription na importação abaixo
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Building2, TrendingUp, TrendingDown, Target, Users, PieChart } from "lucide-react";
+import { Building2, TrendingUp, TrendingDown, Target, PieChart } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { NewSharedGoalModal } from "@/components/dashboard/organization/new-shared-goal-modal";
 import { DepositGoalModal } from "@/components/dashboard/goals/deposit-goal-modal";
@@ -17,7 +16,7 @@ import { OrgFilters } from "@/components/dashboard/organization/org-filters";
 export default async function OrganizationPage({
   searchParams
 }: {
-  searchParams: Promise<{ month?: string, filterWorkspace?: string, filterType?: string }>
+  searchParams: Promise<{ month?: string, from?: string, to?: string, filterWorkspace?: string, filterType?: string }>
 }) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) redirect("/login");
@@ -37,15 +36,24 @@ export default async function OrganizationPage({
 
   // --- FILTROS DE DATA E CONTEXTO ---
   const now = new Date();
-  let dateFilter = now;
-  
-  if (params.month) {
-    const [y, m] = params.month.split('-');
-    dateFilter = new Date(parseInt(y), parseInt(m) - 1, 1);
-  }
+  let startDate: Date;
+  let endDate: Date;
 
-  const firstDay = new Date(dateFilter.getFullYear(), dateFilter.getMonth(), 1);
-  const lastDay = new Date(dateFilter.getFullYear(), dateFilter.getMonth() + 1, 0);
+  // Lógica de Datas: Prioriza Range Personalizado (from/to) sobre Mês
+  if (params.from && params.to) {
+    // Força o horário para garantir cobertura total do dia (00:00:00 até 23:59:59)
+    startDate = new Date(params.from + "T00:00:00");
+    endDate = new Date(params.to + "T23:59:59");
+  } else {
+    // Fallback para Mês Padrão
+    let dateFilter = now;
+    if (params.month) {
+      const [y, m] = params.month.split('-');
+      dateFilter = new Date(parseInt(y), parseInt(m) - 1, 1);
+    }
+    startDate = new Date(dateFilter.getFullYear(), dateFilter.getMonth(), 1);
+    endDate = new Date(dateFilter.getFullYear(), dateFilter.getMonth() + 1, 0, 23, 59, 59);
+  }
 
   const filterWorkspaceId = params.filterWorkspace && params.filterWorkspace !== 'ALL' ? params.filterWorkspace : undefined;
   const filterType = params.filterType && params.filterType !== 'ALL' ? params.filterType : undefined;
@@ -60,7 +68,7 @@ export default async function OrganizationPage({
       bankAccounts: true,
       transactions: {
         where: { 
-            date: { gte: firstDay, lte: lastDay },
+            date: { gte: startDate, lte: endDate },
             ...(filterType && { type: filterType as any })
         },
         include: { category: true }
@@ -80,7 +88,7 @@ export default async function OrganizationPage({
             tenantId,
             ...(filterWorkspaceId && { id: filterWorkspaceId }) 
         },
-        date: { gte: firstDay, lte: lastDay },
+        date: { gte: startDate, lte: endDate },
         ...(filterType && { type: filterType as any })
     },
     orderBy: { date: 'desc' },
