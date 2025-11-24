@@ -94,13 +94,21 @@ export function checkPermission(
 ): boolean {
   if (userRole === 'OWNER') return true;
 
+  // Garante que safeSettings seja um objeto
   const safeSettings = settings && typeof settings === 'object' ? settings : DEFAULT_TENANT_SETTINGS;
-  const perms = safeSettings.permissions || DEFAULT_TENANT_SETTINGS.permissions;
+  
+  // Garante que perms seja o do settings OU o padrão, e que não seja null
+  const perms = (safeSettings?.permissions) || DEFAULT_TENANT_SETTINGS.permissions;
+
+  // Proteção extra: se perms for null/undefined por algum motivo bizarro do banco
+  if (!perms) return false;
 
   const rolePerms = userRole === 'ADMIN' 
     ? (perms.admin || DEFAULT_TENANT_SETTINGS.permissions.admin)
     : (perms.member || DEFAULT_TENANT_SETTINGS.permissions.member);
 
-  // Retorna a permissão específica ou false se não existir
+  // Se rolePerms ainda for undefined, retorna false
+  if (!rolePerms) return false;
+
   return rolePerms[permissionKey] ?? false;
 }

@@ -16,6 +16,7 @@ import { ManageAccessModal } from "@/components/dashboard/settings/manage-access
 import { EditWorkspaceModal } from "@/components/dashboard/settings/edit-workspace-modal"; 
 import { EditRoleModal } from "@/components/dashboard/settings/edit-role-modal"; 
 import { AuditList } from "@/components/dashboard/settings/audit-list"; 
+import { BillingTab } from "@/components/dashboard/settings/billing-tab"; // <--- IMPORT NOVO
 import { DEFAULT_TENANT_SETTINGS } from "@/lib/permissions";
 
 export default async function SettingsPage() {
@@ -44,7 +45,6 @@ export default async function SettingsPage() {
 
   const currentSettings = (tenant.settings || DEFAULT_TENANT_SETTINGS) as any;
 
-  // --- BUSCA DE LOGS (SÓ PARA DONO) ---
   let auditLogs: any[] = [];
   if (isOwner) {
       auditLogs = await prisma.auditLog.findMany({
@@ -78,6 +78,16 @@ export default async function SettingsPage() {
              <Shield className="w-4 h-4 mr-2" /> Permissões & Roles
           </TabsTrigger>
           
+          {/* ABA HABILITADA PARA O DONO */}
+          {isOwner && (
+            <TabsTrigger 
+                value="billing" 
+                className="data-[state=active]:bg-muted data-[state=active]:text-foreground text-muted-foreground hover:text-foreground h-10 px-4" 
+            >
+                <CreditCard className="w-4 h-4 mr-2" /> Assinatura
+            </TabsTrigger>
+          )}
+
           {isOwner && (
              <TabsTrigger 
                 value="audit" 
@@ -86,20 +96,9 @@ export default async function SettingsPage() {
                 <ScrollText className="w-4 h-4 mr-2" /> Auditoria
              </TabsTrigger>
           )}
-
-          <TabsTrigger 
-            value="billing" 
-            className="data-[state=active]:bg-muted data-[state=active]:text-foreground text-muted-foreground opacity-50 cursor-not-allowed h-10 px-4" 
-            disabled
-          >
-             <CreditCard className="w-4 h-4 mr-2" /> Cobrança (Em breve)
-          </TabsTrigger>
         </TabsList>
 
-        {/* --- ABA GERAL --- */}
         <TabsContent value="general" className="space-y-6 mt-6">
-            
-            {/* NOME DO TENANT */}
             <Card className="bg-card border-border shadow-sm">
                 <CardHeader>
                     <CardTitle className="text-foreground flex items-center gap-2">
@@ -134,7 +133,6 @@ export default async function SettingsPage() {
                 </CardContent>
             </Card>
 
-            {/* WORKSPACES */}
             <Card className="bg-card border-border shadow-sm">
                 <CardHeader>
                     <CardTitle className="text-foreground flex items-center gap-2">
@@ -155,15 +153,10 @@ export default async function SettingsPage() {
                                     <p className="text-xs text-muted-foreground">ID: {ws.id.slice(0, 8)}...</p>
                                 </div>
                             </div>
-                            
                             <div className="flex items-center gap-1">
                                 {isAdmin && <EditWorkspaceModal workspace={ws} />}
-
                                 {isAdmin && tenant.workspaces.length > 1 && (
-                                    <form action={async () => {
-                                        'use server';
-                                        await deleteWorkspace(ws.id);
-                                    }}>
+                                    <form action={async () => { 'use server'; await deleteWorkspace(ws.id); }}>
                                         <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-rose-500 hover:bg-rose-500/10">
                                             <Trash2 className="w-4 h-4" />
                                         </Button>
@@ -175,7 +168,6 @@ export default async function SettingsPage() {
                 </CardContent>
             </Card>
 
-            {/* MEMBROS */}
             <Card className="bg-card border-border shadow-sm">
                 <CardHeader>
                     <CardTitle className="text-foreground flex items-center gap-2">
@@ -186,7 +178,6 @@ export default async function SettingsPage() {
                 </CardHeader>
                 <CardContent className="space-y-6">
                     {isAdmin && <InviteMemberForm workspaces={tenant.workspaces} />}
-
                     <div className="space-y-3">
                         {tenant.users.map((u) => (
                             <div key={u.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors gap-4">
@@ -202,30 +193,17 @@ export default async function SettingsPage() {
                                             {u.lastLogin && (
                                                 <>
                                                     <span className="w-1 h-1 rounded-full bg-slate-400" />
-                                                    <span>
-                                                        Último acesso: {new Date(u.lastLogin).toLocaleDateString('pt-BR')}
-                                                    </span>
+                                                    <span>Último acesso: {new Date(u.lastLogin).toLocaleDateString('pt-BR')}</span>
                                                 </>
                                             )}
                                         </div>
                                     </div>
                                 </div>
-                                
                                 <div className="flex items-center gap-3 justify-between sm:justify-end w-full sm:w-auto">
-                                    
-                                    <EditRoleModal 
-                                        user={{ id: u.id, name: u.name, role: u.role }} 
-                                        currentUserRole={user.role} 
-                                    />
-
+                                    <EditRoleModal user={{ id: u.id, name: u.name, role: u.role }} currentUserRole={user.role} />
                                     {isAdmin && (
-                                        <ManageAccessModal 
-                                            user={u} 
-                                            allWorkspaces={tenant.workspaces} 
-                                            userWorkspaces={u.workspaces.map(wm => wm.workspaceId)} 
-                                        />
+                                        <ManageAccessModal user={u} allWorkspaces={tenant.workspaces} userWorkspaces={u.workspaces.map(wm => wm.workspaceId)} />
                                     )}
-
                                     {isAdmin && u.id !== user.id && u.role !== 'OWNER' && (
                                         <form action={async () => { 'use server'; await removeMember(u.id); }}>
                                             <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-rose-500"><Trash2 className="w-4 h-4" /></Button>
@@ -239,18 +217,22 @@ export default async function SettingsPage() {
             </Card>
         </TabsContent>
 
-        {/* --- ABA PERMISSÕES --- */}
         <TabsContent value="permissions" className="mt-6">
              <PermissionsForm settings={currentSettings} isOwner={isOwner} />
         </TabsContent>
+
+        {/* --- ABA DE COBRANÇA (NOVA) --- */}
+        {isOwner && (
+            <TabsContent value="billing" className="mt-6">
+                <BillingTab />
+            </TabsContent>
+        )}
         
-        {/* --- ABA AUDITORIA (SÓ OWNER) --- */}
         {isOwner && (
             <TabsContent value="audit" className="mt-6">
                 <AuditList logs={auditLogs} />
             </TabsContent>
         )}
-
       </Tabs>
     </div>
   );

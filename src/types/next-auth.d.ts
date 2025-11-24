@@ -2,12 +2,14 @@ import NextAuth, { DefaultSession } from "next-auth"
 
 declare module "next-auth" {
   /**
-   * Estende a interface de Sessão para incluir id e tenantId
+   * Estende a interface de Sessão para incluir dados extras
    */
   interface Session {
     user: {
       id: string;
       tenantId: string;
+      role: string; // <--- Adicionado
+      subscriptionStatus: string; // <--- Adicionado
     } & DefaultSession["user"]
   }
 

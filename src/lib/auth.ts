@@ -8,7 +8,6 @@ const prisma = globalForPrisma.prisma || new PrismaClient()
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma
 
 export const authOptions: NextAuthOptions = {
-  // CORREÇÃO AQUI: Adicionado 'as any' para resolver o conflito de versões de tipos
   adapter: {
     ...PrismaAdapter(prisma),
     createUser: async (data: any) => {
@@ -19,7 +18,8 @@ export const authOptions: NextAuthOptions = {
         data: {
           name: tenantName,
           slug: slug,
-          subscriptionStatus: "TRIAL"
+          subscriptionStatus: "INACTIVE",
+          planType: "FREE"
         }
       });
 
@@ -55,6 +55,10 @@ export const authOptions: NextAuthOptions = {
     }
   } as any, 
 
+  session: {
+    strategy: "jwt",
+  },
+
   providers: [
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID!,
@@ -70,29 +74,66 @@ export const authOptions: NextAuthOptions = {
     }),
   ],
   callbacks: {
-    async signIn({ user, account, profile }) {
+    async signIn({ user, profile }) {
       if (user.email) {
         try {
-          const googleProfile = profile as any;
-          
-          await prisma.user.update({
-            where: { email: user.email },
-            data: {
-              name: googleProfile?.name || user.name,
-              image: googleProfile?.picture || user.image,
-              lastLogin: new Date()
-            }
+          // --- CORREÇÃO AQUI ---
+          // Verifica se o usuário JÁ EXISTE antes de tentar atualizar.
+          // Se não existir, não faz nada (o createUser lá em cima vai cuidar dele).
+          const existingUser = await prisma.user.findUnique({ 
+            where: { email: user.email } 
           });
+
+          if (existingUser) {
+            const googleProfile = profile as any;
+            await prisma.user.update({
+              where: { email: user.email },
+              data: {
+                name: googleProfile?.name || user.name,
+                image: googleProfile?.picture || user.image,
+                lastLogin: new Date()
+              }
+            });
+          }
         } catch (error) {
-          console.error("Erro ao atualizar usuário:", error);
+          console.error("Erro ao processar login:", error);
+          // Não bloqueia o login mesmo se der erro na atualização
         }
       }
       return true;
     },
-    async session({ session, user }) {
+async jwt({ token, user, trigger }) {
+      if (user) {
+        token.id = user.id;
+        token.email = user.email;
+      }
+
+      if (token.email) {
+         const dbUser = await prisma.user.findUnique({
+            where: { email: token.email as string },
+            include: { tenant: true }
+         });
+         
+         if (dbUser) {
+            token.tenantId = dbUser.tenantId;
+            token.subscriptionStatus = dbUser.tenant.subscriptionStatus;
+            token.role = dbUser.role;
+            // ADICIONADO:
+            token.nextPayment = dbUser.tenant.nextPayment; 
+         }
+      }
+      return token;
+    },
+    async session({ session, token }) {
       if (session?.user) {
-        session.user.id = user.id;
-        session.user.tenantId = user.tenantId; 
+        session.user.id = token.id as string;
+        session.user.tenantId = token.tenantId as string;
+        // @ts-ignore
+        session.user.subscriptionStatus = token.subscriptionStatus;
+        // @ts-ignore
+        session.user.role = token.role;
+        // @ts-ignore
+        session.user.nextPayment = token.nextPayment;
       }
       return session;
     },

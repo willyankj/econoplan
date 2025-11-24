@@ -18,14 +18,19 @@ model Tenant {
   logoUrl            String?
   createdAt          DateTime    @default(now())
   updatedAt          DateTime    @updatedAt
-  subscriptionStatus String      @default("TRIAL") 
-  stripeCustomerId   String?
+  
+  // --- GESTÃO DE ASSINATURA (NOVO) ---
+  subscriptionStatus String      @default("TRIAL") // ACTIVE, INACTIVE, TRIAL
+  planType           String      @default("FREE")  // MONTHLY, YEARLY
+  nextPayment        DateTime?                     // Data do próximo vencimento
+  mercadoPagoId      String?                       // ID do cliente no MP (opcional)
+  
   settings           Json?       @default("{}") 
   
   users              User[]
   workspaces         Workspace[]
   goals              Goal[]      
-  auditLogs          AuditLog[]   // <-- CORREÇÃO: Adicionado back-relation
+  auditLogs          AuditLog[]
 }
 
 model Workspace {
@@ -44,7 +49,7 @@ model Workspace {
   budgets       Budget[]
   creditCards   CreditCard[]
   goals         Goal[]            
-  
+ 
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
 
@@ -67,7 +72,7 @@ model User {
   sessions      Session[]
   workspaces    WorkspaceMember[]
   notifications Notification[]    
-  auditLogs     AuditLog[]        // <-- CORREÇÃO: Adicionado back-relation
+  auditLogs     AuditLog[]  
   
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
@@ -137,7 +142,7 @@ model VerificationToken {
   identifier String
   token      String   @unique
   expires    DateTime
- 
+
   @@unique([identifier, token])
 }
 
@@ -272,7 +277,6 @@ model Goal {
   targetAmount  Decimal   
   currentAmount Decimal   @default(0) 
   deadline      DateTime?
-  
   workspaceId   String?
   workspace     Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   
@@ -298,15 +302,10 @@ model Notification {
   read        Boolean  @default(false)
   type        String   @default("INFO")
   link        String?
-  
   createdAt   DateTime @default(now())
 
   @@index([userId])
 }
-
-// -------------------------------------------------
-// Segurança e Auditoria
-// -------------------------------------------------
 
 model AuditLog {
   id        String   @id @default(uuid())
@@ -314,7 +313,7 @@ model AuditLog {
   
   action    String   
   entity    String   
-  entityId  String?  
+  entityId  String?
   details   String?  
 
   userId    String

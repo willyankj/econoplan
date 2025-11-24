@@ -29,7 +29,7 @@ export default async function OrganizationPage({
 
   if (!user) return <div>Erro.</div>;
 
-  const hasAccess = checkPermission(user.role, user.tenant.settings, 'canViewOrganization');
+  const hasAccess = checkPermission(user.role, user.tenant.settings, 'org_view');
   if (!hasAccess) redirect("/dashboard");
 
   const tenantId = user.tenantId;

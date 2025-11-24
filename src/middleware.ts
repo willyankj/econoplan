@@ -5,21 +5,25 @@ export default withAuth(
   async function middleware(req) {
     const token = req.nextauth.token;
     const isDashboard = req.nextUrl.pathname.startsWith("/dashboard");
-    const isPlansPage = req.nextUrl.pathname.startsWith("/plans");
 
-    // Se não tiver token, o withAuth já redireciona para login.
-    
-    // Se o usuário estiver tentando acessar o dashboard
     if (isDashboard && token) {
-      // Aqui precisaríamos saber o status da assinatura do token.
-      // Como o token do NextAuth é gerado no login, precisamos garantir que ele tenha essa info.
-      // Se o status for TRIAL ou INACTIVE, manda para os planos.
+      const user = token as any;
+      const status = user.subscriptionStatus;
       
-      // NOTA: Para simplificar, vamos assumir que você vai adicionar 'subscriptionStatus' ao token no auth.ts
-      // Se não tiver status ou não for ACTIVE, redireciona.
-      const status = (token as any).subscriptionStatus;
+      // Verifica se tem data de vencimento
+      const nextPayment = user.nextPayment ? new Date(user.nextPayment) : null;
+      const now = new Date();
       
-      if (status !== 'ACTIVE' && status !== 'TRIAL_PREMIUM') {
+      // Lógica de Liberação:
+      // 1. Se for ACTIVE, libera.
+      // 2. Se for TRIAL_PREMIUM, libera.
+      // 3. Se for CANCELED, mas a data de vencimento ainda for futura, libera.
+      const isValid = 
+        status === 'ACTIVE' || 
+        status === 'TRIAL_PREMIUM' || 
+        (status === 'CANCELED' && nextPayment && nextPayment > now);
+
+      if (!isValid) {
          return NextResponse.redirect(new URL("/plans", req.url));
       }
     }
@@ -34,5 +38,5 @@ export default withAuth(
 );
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/plans/:path*"],
+  matcher: ["/dashboard/:path*", "/plans"],
 };
