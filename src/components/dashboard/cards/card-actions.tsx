@@ -11,10 +11,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { deleteCreditCard } from "@/app/dashboard/actions";
+import { deleteCreditCard } from '@/app/dashboard/actions/finance'; // <--- ATUALIZADO PARA O NOVO CAMINHO
 import { useRouter } from "next/navigation";
-import { EditCardModal } from "./edit-card-modal";
-import { toast } from "sonner"; // <--- IMPORTANTE
+import { CardModal } from "./card-modal"; // <--- IMPORT UNIFICADO
+import { toast } from "sonner";
 
 interface CardActionsProps {
   card: any;
@@ -72,7 +72,8 @@ export function CardActions({ card, accounts }: CardActionsProps) {
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <EditCardModal 
+      {/* USANDO O CARD MODAL UNIFICADO PARA EDIÇÃO */}
+      <CardModal 
         card={card} 
         accounts={accounts} 
         open={showEdit} 

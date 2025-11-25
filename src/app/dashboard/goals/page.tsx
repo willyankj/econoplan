@@ -6,10 +6,9 @@ import { Progress } from "@/components/ui/progress";
 import { getUserWorkspace } from "@/lib/get-user-workspace";
 import { DepositGoalModal } from "@/components/dashboard/goals/deposit-goal-modal";
 import { deleteGoal } from "@/app/dashboard/actions";
-import { NewGoalModal } from "@/components/dashboard/goals/new-goal-modal";
-import { EditGoalModal } from "@/components/dashboard/goals/edit-goal-modal";
+import { GoalModal } from "@/components/dashboard/goals/goal-modal"; // <--- NOVO IMPORT
 import { GoalInfoDialog } from "@/components/dashboard/goals/goal-info-dialog";
-import { formatCurrency } from "@/lib/utils"; // <--- Importado
+import { formatCurrency } from "@/lib/utils";
 
 export default async function GoalsPage() {
   const { workspaceId, user } = await getUserWorkspace();
@@ -43,7 +42,8 @@ export default async function GoalsPage() {
           <h2 className="text-2xl font-bold text-foreground">Meus Objetivos</h2>
           <p className="text-muted-foreground">Sonhos e Metas Financeiras</p>
         </div>
-        <NewGoalModal />
+        {/* MUDANÇA: Usando GoalModal para criar nova meta */}
+        <GoalModal />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -65,10 +65,14 @@ export default async function GoalsPage() {
                 </CardTitle>
                 <div className="flex items-center gap-1">
                     {isShared && <span className="text-[10px] font-bold bg-purple-500/10 text-purple-500 px-2 py-0.5 rounded uppercase mr-2">Conjunta</span>}
+                    
                     <GoalInfoDialog goal={goal} />
+                    
                     {!isShared && (
                         <>
-                            <EditGoalModal goal={goal} />
+                            {/* MUDANÇA: Usando GoalModal para editar (passando a prop 'goal') */}
+                            <GoalModal goal={goal} />
+                            
                             <form action={async () => { 'use server'; await deleteGoal(goal.id); }}>
                                 <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive"><Trash2 className="w-4 h-4" /></Button>
                             </form>
@@ -112,7 +116,8 @@ export default async function GoalsPage() {
               <p className="text-sm max-w-md text-center mb-8">
                   Viagem, carro novo ou reserva de emergência? Crie uma meta e acompanhe seu progresso visualmente.
               </p>
-              <NewGoalModal />
+              {/* MUDANÇA: Usando GoalModal no estado vazio */}
+              <GoalModal />
            </div>
         )}
       </div>

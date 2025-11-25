@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Building2, TrendingUp, TrendingDown, Target, PieChart } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
-import { NewSharedGoalModal } from "@/components/dashboard/organization/new-shared-goal-modal";
+import { GoalModal } from "@/components/dashboard/goals/goal-modal";
 import { DepositGoalModal } from "@/components/dashboard/goals/deposit-goal-modal";
 import { checkPermission } from "@/lib/permissions";
 import { TenantOverviewCharts } from "@/components/dashboard/organization/tenant-overview-charts";
@@ -252,7 +252,8 @@ export default async function OrganizationPage({
                 <Target className="w-5 h-5 text-purple-500" />
                 Metas Compartilhadas
             </h3>
-            <NewSharedGoalModal />
+            {/* MUDANÇA: Usando GoalModal com flag isShared */}
+            <GoalModal isShared={true} />
         </div>
 
         {sharedGoals.length === 0 ? (

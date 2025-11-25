@@ -1,8 +1,9 @@
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Wallet, CreditCard, Landmark } from "lucide-react";
-import { NewAccountModal } from "@/components/dashboard/accounts/new-account-modal";
-import { EditAccountModal } from "@/components/dashboard/accounts/edit-account-modal";
+// REMOVA: import { NewAccountModal } ... e EditAccountModal ...
+// ADICIONE:
+import { AccountModal } from "@/components/dashboard/accounts/account-modal"; 
 import { DeleteAccountButton } from "@/components/dashboard/accounts/delete-account-button"; 
 import { BankLogo } from "@/components/ui/bank-logo";
 import { getUserWorkspace } from "@/lib/get-user-workspace";
@@ -28,7 +29,8 @@ export default async function AccountsPage() {
           <h2 className="text-2xl font-bold text-foreground">Minhas Contas</h2>
           <p className="text-muted-foreground">Gerencie suas fontes de dinheiro</p>
         </div>
-        <NewAccountModal />
+        {/* MUDANÇA 1: Botão de Criar (sem props) */}
+        <AccountModal />
       </div>
 
       {accounts.length === 0 ? (
@@ -41,7 +43,8 @@ export default async function AccountsPage() {
                 Para controlar suas finanças, o primeiro passo é adicionar onde seu dinheiro está guardado (Carteira, Banco, etc).
             </p>
             <div className="transform scale-110">
-                <NewAccountModal />
+                {/* MUDANÇA 2: Botão de Criar no estado vazio */}
+                <AccountModal />
             </div>
         </div>
       ) : (
@@ -75,7 +78,8 @@ export default async function AccountsPage() {
                         <p className="text-sm text-muted-foreground">{account.name}</p>
                         
                         <div className="flex items-center gap-1">
-                            <EditAccountModal 
+                            {/* MUDANÇA 3: Botão de Editar (passando a prop 'account') */}
+                            <AccountModal 
                                 account={{ ...account, balance: Number(account.balance) }} 
                             />
                             <DeleteAccountButton id={account.id} name={account.name} />

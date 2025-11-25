@@ -6,7 +6,10 @@ import { cookies } from 'next/headers';
 
 import { SidebarUI } from '@/components/dashboard/sidebar-ui';
 import { MobileSidebar } from '@/components/dashboard/mobile-sidebar';
-import { NewTransactionModal } from '@/components/dashboard/new-transaction-modal';
+// REMOVIDO: import { NewTransactionModal } from '@/components/dashboard/new-transaction-modal';
+// ADICIONADO:
+import { TransactionModal } from '@/components/dashboard/transaction-modal';
+
 import { NotificationBell } from "@/components/dashboard/notifications/notification-bell";
 import { getNotifications } from "@/app/dashboard/actions";
 
@@ -50,10 +53,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const notifications = await getNotifications();
 
   return (
-    // MUDANÇA PRINCIPAL: Flex Layout para a tela inteira
     <div className="flex h-screen overflow-hidden bg-background text-foreground font-sans">
       
-      {/* Sidebar Desktop agora é um Flex Item, não Fixed */}
+      {/* Sidebar Desktop */}
       <div className="hidden lg:flex h-full z-30 shrink-0">
         <SidebarUI 
             user={user}
@@ -64,7 +66,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         />
       </div>
 
-      {/* Conteúdo Principal: Flex-1 para ocupar o resto do espaço */}
+      {/* Conteúdo Principal */}
       <div className="flex-1 flex flex-col h-full overflow-hidden relative">
         
         {/* Header */}
@@ -89,7 +91,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
             <div className="flex items-center gap-4">
                <NotificationBell notifications={notifications} />
-               <NewTransactionModal accounts={accounts} cards={cards} />
+               {/* USANDO O NOVO MODAL EM MODO CRIAÇÃO (sem prop 'transaction') */}
+               <TransactionModal accounts={accounts} cards={cards} />
             </div>
         </header>
 

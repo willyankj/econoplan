@@ -3,12 +3,12 @@
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Trash2, Loader2, Pencil, ExternalLink } from "lucide-react";
+import { Trash2, Loader2, ExternalLink } from "lucide-react";
 import { deleteBudget } from "@/app/dashboard/actions";
-import { EditBudgetModal } from "./edit-budget-modal";
+import { BudgetModal } from "./budget-modal"; // <--- NOVO
 import Link from "next/link";
 import { toast } from "sonner";
-import { formatCurrency } from "@/lib/utils"; // <--- Importado
+import { formatCurrency } from "@/lib/utils";
 
 interface BudgetCardProps {
   budget: {
@@ -51,8 +51,6 @@ export function BudgetCard({ budget }: BudgetCardProps) {
   return (
     <>
       <Card className="relative overflow-hidden bg-card border-border shadow-sm hover:border-primary/50 transition-all group">
-        
-        {/* --- BACKGROUND SHAPE (GRADIENTE ROXO/VIOLETA) --- */}
         <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-purple-500/20 to-transparent rounded-bl-full -mr-6 -mt-6 pointer-events-none" />
 
         <CardHeader className="flex flex-row items-center justify-between pb-2 relative z-10">
@@ -66,9 +64,9 @@ export function BudgetCard({ budget }: BudgetCardProps) {
           </CardTitle>
           
           <div className="flex items-center gap-1">
-            <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground" onClick={() => setShowEdit(true)}>
-                <Pencil className="w-3 h-3" />
-            </Button>
+            {/* BOTÃO EDITAR AGORA ABRE O MODAL UNIFICADO */}
+            <BudgetModal budget={budget} open={showEdit} onOpenChange={setShowEdit} />
+            
             <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-rose-500 hover:bg-rose-500/10" onClick={handleDelete} disabled={isLoading}>
                 {isLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
             </Button>
@@ -94,8 +92,6 @@ export function BudgetCard({ budget }: BudgetCardProps) {
           </div>
         </CardContent>
       </Card>
-
-      <EditBudgetModal budget={budget} open={showEdit} onOpenChange={setShowEdit} />
     </>
   );
 }

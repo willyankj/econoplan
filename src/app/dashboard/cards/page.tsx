@@ -1,12 +1,12 @@
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CalendarDays, CreditCard, ShieldCheck } from "lucide-react";
-import { NewCardModal } from "@/components/dashboard/cards/new-card-modal";
+import { CardModal } from "@/components/dashboard/cards/card-modal"; // <--- NOVO IMPORT
 import { BankLogo } from "@/components/ui/bank-logo";
 import { PayInvoiceModal } from "@/components/dashboard/cards/pay-invoice-modal";
 import { CardActions } from "@/components/dashboard/cards/card-actions";
 import { getUserWorkspace } from "@/lib/get-user-workspace";
-import { formatCurrency } from "@/lib/utils"; // <--- Importado
+import { formatCurrency } from "@/lib/utils";
 
 export default async function CardsPage() {
   const { workspaceId } = await getUserWorkspace();
@@ -37,10 +37,10 @@ export default async function CardsPage() {
           <h2 className="text-2xl font-bold text-foreground">Meus Cartões</h2>
           <p className="text-muted-foreground">Gerencie limites e faturas</p>
         </div>
-        <NewCardModal accounts={accounts} />
+        {/* USANDO O NOVO MODAL */}
+        <CardModal accounts={accounts} />
       </div>
 
-      {/* --- ESTADO VAZIO EXCLUSIVO (CARTÕES) --- */}
       {cards.length === 0 ? (
         <div className="grid place-items-center py-16 px-4 border border-blue-500/20 rounded-2xl bg-gradient-to-b from-blue-500/5 to-transparent text-center">
             <div className="relative mb-6">
@@ -52,7 +52,8 @@ export default async function CardsPage() {
             <p className="text-muted-foreground max-w-sm mb-8 mt-2">
                 Não perca o controle das faturas. Cadastre seus cartões de crédito para acompanhar gastos e limites em tempo real.
             </p>
-            <NewCardModal accounts={accounts} />
+            {/* USANDO O NOVO MODAL NO ESTADO VAZIO */}
+            <CardModal accounts={accounts} />
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

@@ -11,7 +11,6 @@ services:
     volumes:
       - econoplan_data:/var/lib/postgresql/data
 
-# Aqui dizemos ao Docker: "Use o volume que já existe, não crie um novo"
 volumes:
   econoplan_data:
     external: true

@@ -8,13 +8,14 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CreditCard, CheckCircle2, Clock, CheckCheck } from "lucide-react";
 
 import { DeleteTransactionButton } from "./delete-button";
-import { EditTransactionModal } from "@/components/dashboard/edit-transaction-modal";
+import { TransactionModal } from "@/components/dashboard/transaction-modal"; // <--- NOVO IMPORT
 import { TransactionFilterButton } from "./filter-button";
 import { SearchInput } from "./search-input";
 import { ExportButton } from "./export-button";
 import { BankLogo } from "@/components/ui/bank-logo";
 import { getUserWorkspace } from "@/lib/get-user-workspace"; 
 import { ImportTransactionsModal } from "@/components/dashboard/transactions/import-modal"; 
+import { formatCurrency } from "@/lib/utils";
 
 export const dynamic = 'force-dynamic';
 
@@ -40,11 +41,8 @@ export default async function TransactionsPage({
   // 2. CONSTRUÇÃO DO FILTRO (WHERE)
   const whereCondition: any = { 
     workspaceId,
-    // Soft Delete: garante que não pega itens excluídos se você implementou isso em transações também
-    // deletedAt: null, 
   };
 
-  // Filtro de Texto (Busca)
   if (params.q) {
     whereCondition.OR = [
         { description: { contains: params.q, mode: 'insensitive' } },
@@ -52,21 +50,14 @@ export default async function TransactionsPage({
     ];
   }
   
-  // Filtros Específicos
   if (params.type && params.type !== 'ALL') whereCondition.type = params.type;
   if (params.accountId) whereCondition.bankAccountId = params.accountId;
   if (params.cardId) whereCondition.creditCardId = params.cardId;
   
-  // CORREÇÃO PRINCIPAL: Filtro de Categoria
-  // Antes talvez não estivesse pegando o categoryId da URL corretamente
   if (params.categoryId && params.categoryId !== 'ALL') {
       whereCondition.categoryId = params.categoryId;
   }
 
-  // CORREÇÃO DE DATAS:
-  // Se vier da URL (Orçamento), usa as datas exatas.
-  // Se não vier, não aplica filtro de data (mostra tudo) OU aplica mês atual (depende da sua regra).
-  // Aqui vou deixar a lógica: Se tem data, usa. Se não tem, mostra as últimas 100 (padrão do prisma take).
   if (params.from && params.to) {
     whereCondition.date = {
       gte: new Date(params.from + "T00:00:00"),
@@ -77,13 +68,9 @@ export default async function TransactionsPage({
   const transactions = await prisma.transaction.findMany({
     where: whereCondition,
     orderBy: { date: 'desc' },
-    take: 100, // Limite de segurança
+    take: 100,
     include: { category: true, bankAccount: true, creditCard: true }
   });
-
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
-  };
 
   const transactionsForExport = transactions.map(t => ({
     description: t.description,
@@ -197,7 +184,8 @@ export default async function TransactionsPage({
                     
                     <TableCell className="text-right">
                         <div className="flex justify-end items-center gap-1">
-                            <EditTransactionModal transaction={transactionForModal} />
+                            {/* USANDO O NOVO MODAL EM MODO EDIÇÃO */}
+                            <TransactionModal transaction={transactionForModal} />
                             <DeleteTransactionButton id={t.id} />
                         </div>
                     </TableCell>

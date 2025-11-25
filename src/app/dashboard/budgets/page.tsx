@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
-import { NewBudgetModal } from "@/components/dashboard/budgets/new-budget-modal";
+import { BudgetModal } from "@/components/dashboard/budgets/budget-modal"; // <--- NOVO
 import { BudgetCard } from "@/components/dashboard/budgets/budget-card";
-import { PieChart, ChevronLeft, ChevronRight, Target } from "lucide-react";
+import { PieChart, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { getUserWorkspace } from "@/lib/get-user-workspace";
@@ -69,10 +69,10 @@ export default async function BudgetsPage({
             </Link>
         </div>
 
-        <NewBudgetModal categories={categories} />
+        {/* MUDANÇA: Usando BudgetModal unificado */}
+        <BudgetModal categories={categories} />
       </div>
 
-      {/* --- ESTADO VAZIO EXCLUSIVO (ORÇAMENTOS) --- */}
       {budgetData.length === 0 ? (
          <div className="flex flex-col items-center justify-center p-16 border border-rose-500/20 rounded-xl bg-gradient-to-b from-rose-500/5 to-transparent text-muted-foreground">
             <div className="p-5 bg-rose-100 dark:bg-rose-900/30 rounded-full mb-5 animate-pulse">
@@ -82,7 +82,8 @@ export default async function BudgetsPage({
             <p className="text-sm max-w-md text-center mb-6">
                 Defina um teto para categorias como "Mercado" ou "Lazer" e o Econoplan te avisa antes do dinheiro acabar.
             </p>
-            <NewBudgetModal categories={categories} />
+            {/* MUDANÇA: Usando BudgetModal unificado */}
+            <BudgetModal categories={categories} />
          </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
