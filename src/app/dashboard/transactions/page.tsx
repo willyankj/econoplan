@@ -13,23 +13,22 @@ import { TransactionFilterButton } from "./filter-button";
 import { SearchInput } from "./search-input";
 import { ExportButton } from "./export-button";
 import { BankLogo } from "@/components/ui/bank-logo";
-import { getUserWorkspace } from "@/lib/get-user-workspace"; // Importante
-import { ImportTransactionsModal } from "@/components/dashboard/transactions/import-modal"; // Importar
+import { getUserWorkspace } from "@/lib/get-user-workspace"; 
+import { ImportTransactionsModal } from "@/components/dashboard/transactions/import-modal"; 
 
 export const dynamic = 'force-dynamic';
 
 export default async function TransactionsPage({
   searchParams
 }: {
-  searchParams: Promise<{ type?: string, q?: string, cardId?: string, accountId?: string, from?: string, to?: string }>
+  searchParams: Promise<{ type?: string, q?: string, cardId?: string, accountId?: string, from?: string, to?: string, categoryId?: string }>
 }) {
-  // CORREÇÃO: Usa o workspace ativo
   const { workspaceId, user } = await getUserWorkspace();
   if (!workspaceId || !user) redirect("/login");
 
   const params = await searchParams;
 
-  // 1. BUSCA DADOS
+  // 1. BUSCA DADOS AUXILIARES
   const rawAccounts = await prisma.bankAccount.findMany({ where: { workspaceId }, orderBy: { name: 'asc' } });
   const accounts = rawAccounts.map(acc => ({ ...acc, balance: Number(acc.balance) }));
 
@@ -38,30 +37,47 @@ export default async function TransactionsPage({
 
   const categories = await prisma.category.findMany({ where: { workspaceId }, orderBy: { name: 'asc' } });
 
+  // 2. CONSTRUÇÃO DO FILTRO (WHERE)
   const whereCondition: any = { 
     workspaceId,
-    ...(params.q && {
-      OR: [
+    // Soft Delete: garante que não pega itens excluídos se você implementou isso em transações também
+    // deletedAt: null, 
+  };
+
+  // Filtro de Texto (Busca)
+  if (params.q) {
+    whereCondition.OR = [
         { description: { contains: params.q, mode: 'insensitive' } },
         { category: { name: { contains: params.q, mode: 'insensitive' } } }
-      ]
-    })
-  };
+    ];
+  }
   
+  // Filtros Específicos
   if (params.type && params.type !== 'ALL') whereCondition.type = params.type;
   if (params.accountId) whereCondition.bankAccountId = params.accountId;
   if (params.cardId) whereCondition.creditCardId = params.cardId;
+  
+  // CORREÇÃO PRINCIPAL: Filtro de Categoria
+  // Antes talvez não estivesse pegando o categoryId da URL corretamente
+  if (params.categoryId && params.categoryId !== 'ALL') {
+      whereCondition.categoryId = params.categoryId;
+  }
 
-  if (params.from || params.to) {
-    whereCondition.date = {};
-    if (params.from) whereCondition.date.gte = new Date(params.from + "T00:00:00");
-    if (params.to) whereCondition.date.lte = new Date(params.to + "T23:59:59");
+  // CORREÇÃO DE DATAS:
+  // Se vier da URL (Orçamento), usa as datas exatas.
+  // Se não vier, não aplica filtro de data (mostra tudo) OU aplica mês atual (depende da sua regra).
+  // Aqui vou deixar a lógica: Se tem data, usa. Se não tem, mostra as últimas 100 (padrão do prisma take).
+  if (params.from && params.to) {
+    whereCondition.date = {
+      gte: new Date(params.from + "T00:00:00"),
+      lte: new Date(params.to + "T23:59:59")
+    };
   }
 
   const transactions = await prisma.transaction.findMany({
     where: whereCondition,
     orderBy: { date: 'desc' },
-    take: 100,
+    take: 100, // Limite de segurança
     include: { category: true, bankAccount: true, creditCard: true }
   });
 
@@ -91,7 +107,7 @@ export default async function TransactionsPage({
           <div className="flex gap-2 w-full md:w-auto">
             {!params.cardId && 
               <>
-                <ImportTransactionsModal accounts={accounts} /> {/* ADICIONADO AQUI */}
+                <ImportTransactionsModal accounts={accounts} />
                 <TransactionFilterButton accounts={accounts} cards={cards} categories={categories} />
               </>
             }

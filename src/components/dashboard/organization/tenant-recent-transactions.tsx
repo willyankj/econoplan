@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ArrowDownRight, ArrowUpRight, Briefcase } from "lucide-react";
+import { formatCurrency } from "@/lib/utils"; // <--- Importado
 
 interface Transaction {
   id: string;
@@ -17,8 +18,6 @@ interface Transaction {
 
 export function TenantRecentTransactions({ transactions }: { transactions: Transaction[] }) {
   
-  const formatCurrency = (val: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
-
   return (
     <Card className="bg-card border-border shadow-sm">
       <CardHeader>

@@ -1,7 +1,6 @@
 #!/bin/bash
 
 # O comando 'set -e' faz o script parar imediatamente se ocorrer algum erro.
-# Isso evita que ele tente reiniciar o site se o 'build' falhar, por exemplo.
 set -e
 
 echo "========================================"
@@ -12,25 +11,21 @@ echo "========================================"
 echo "📥 1. Baixando alterações do Git..."
 git pull
 
-# 2. Instalar novas dependências (caso você tenha adicionado alguma biblioteca)
+# 2. Instalar novas dependências
 echo "📦 2. Verificando dependências..."
 npm install
 
-# 3. Atualizar o cliente do Banco de Dados (Prisma)
-# Isso garante que o Next.js entenda as mudanças no schema.prisma
-echo "🗄️  3. Regenerando Prisma Client..."
-npx prisma generate
-
-# Opcional: Se você mudar o banco de dados, descomente a linha abaixo para aplicar automaticamente
-# echo "🔄 3.5 Aplicando migrações no banco..."
-# npx prisma migrate deploy
+# 3. Atualizar o Banco de Dados e o Cliente Prisma
+# MUDANÇA AQUI: 'db push' garante que o banco esteja igual ao schema.prisma
+echo "🗄️  3. Sincronizando Banco de Dados e Gerando Cliente..."
+npx prisma db push
 
 # 4. Criar a versão de produção do Next.js
 echo "🏗️  4. Construindo a aplicação (Build)..."
 npm run build
 
 # 5. Reiniciar o servidor no PM2
-echo "mw 5. Reiniciando o processo 'econoplan'..."
+echo "🔄 5. Reiniciando o processo 'econoplan'..."
 pm2 restart econoplan
 
 echo "========================================"

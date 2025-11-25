@@ -8,6 +8,7 @@ import { cookies } from 'next/headers';
 import { checkPermission } from "@/lib/permissions";
 import { createAuditLog } from "@/lib/audit";
 import { z } from "zod";
+import { sendNotification, notifyWorkspaceMembers } from "@/lib/notifications";
 
 // === SCHEMAS DE VALIDAÇÃO (ZOD) ===
 const TransactionSchema = z.object({
@@ -28,16 +29,12 @@ const AccountSchema = z.object({
 });
 
 // === HELPER: Resolver Workspace Seguro ===
-// Evita erros de FK se o cookie tiver um ID de workspace deletado
 function resolveWorkspaceId(user: any, cookieStore: any) {
     if (!user.workspaces || user.workspaces.length === 0) return null;
 
     const cookieId = cookieStore.get('activeWorkspaceId')?.value;
-    
-    // Verifica se o ID do cookie realmente pertence ao usuário
     const isValid = user.workspaces.some((w: any) => w.workspaceId === cookieId);
 
-    // Se for válido, usa ele. Se não (ex: deletado), usa o primeiro da lista (Default)
     return isValid ? cookieId : user.workspaces[0].workspaceId;
 }
 
@@ -59,7 +56,6 @@ export async function updateTenantName(formData: FormData) {
   if (!session?.user?.email) return { error: "Não autorizado" };
 
   const name = formData.get("name") as string;
-  
   const user = await prisma.user.findUnique({
     where: { email: session.user.email },
     include: { tenant: true }
@@ -179,21 +175,23 @@ export async function inviteMember(formData: FormData) {
   const targetWorkspace = currentUser.tenant.workspaces.find(w => w.id === workspaceId);
   if (!targetWorkspace) return { error: "Workspace inválido." };
 
+  let targetUserId = "";
   const existingUser = await prisma.user.findUnique({ where: { email } });
 
   if (existingUser) {
+    targetUserId = existingUser.id;
     await prisma.user.update({
       where: { email },
       data: { 
         tenantId: currentUser.tenantId,
-        role: role,
+        role: role, 
         workspaces: {
           connectOrCreate: { where: { userId_workspaceId: { userId: existingUser.id, workspaceId: targetWorkspace.id } }, create: { workspaceId: targetWorkspace.id, role: 'MEMBER' } }
         }
       }
     });
   } else {
-    await prisma.user.create({
+    const newUser = await prisma.user.create({
       data: {
         email,
         tenantId: currentUser.tenantId,
@@ -202,7 +200,28 @@ export async function inviteMember(formData: FormData) {
         workspaces: { create: { workspaceId: targetWorkspace.id, role: 'MEMBER' } }
       }
     });
+    targetUserId = newUser.id;
   }
+
+  // 🔔 Notifica Usuário Alvo
+  if (targetUserId) {
+    await sendNotification({
+        userId: targetUserId,
+        title: "Bem-vindo(a)! 🚀",
+        message: `Você foi convidado para o workspace "${targetWorkspace.name}" com o cargo de ${role}.`,
+        type: 'SUCCESS',
+        link: '/dashboard'
+    });
+  }
+
+  // 🔔 Notifica Equipe (exceto quem convidou)
+  await notifyWorkspaceMembers(
+    workspaceId,
+    "Novo Membro na Equipe",
+    `${email} foi adicionado ao time por ${currentUser.name}.`,
+    'INFO',
+    currentUser.id 
+  );
 
   await createAuditLog({
       tenantId: currentUser.tenantId, userId: currentUser.id, action: 'CREATE', entity: 'Member', details: `Convidou ${email} para workspace ${targetWorkspace.name} como ${role}`
@@ -228,6 +247,8 @@ export async function removeMember(userId: string) {
     }
 
     const targetUser = await prisma.user.findUnique({ where: { id: userId } });
+    
+    // Remove fisicamente
     await prisma.user.delete({ where: { id: userId } });
 
     await createAuditLog({
@@ -256,6 +277,14 @@ export async function updateMemberRole(userId: string, formData: FormData) {
 
   await prisma.user.update({ where: { id: userId }, data: { role: newRole as any } });
 
+  // 🔔 Notifica Usuário Alvo
+  await sendNotification({
+      userId: userId,
+      title: "Permissões Alteradas 🛡️",
+      message: `Seu cargo foi atualizado para ${newRole} por ${currentUser.name}.`,
+      type: 'INFO'
+  });
+
   await createAuditLog({
       tenantId: currentUser.tenantId, userId: currentUser.id, action: 'UPDATE', entity: 'Member', details: `Alterou cargo de ${targetUser?.email} para ${newRole}`
   });
@@ -267,22 +296,69 @@ export async function updateMemberRole(userId: string, formData: FormData) {
 export async function deleteWorkspace(workspaceId: string) {
     const session = await getServerSession(authOptions);
     if (!session?.user?.email) return { error: "Não autorizado" };
-    const currentUser = await prisma.user.findUnique({ where: { email: session.user.email }, include: { tenant: true } });
 
-    if (!currentUser) return { error: "Erro usuário" };
-
-    if (!checkPermission(currentUser.role, currentUser.tenant.settings, 'org_manage_workspaces')) {
-        return { error: "Sem permissão." };
-    }
-    
-    const ws = await prisma.workspace.findUnique({ where: { id: workspaceId }});
-    await prisma.workspace.delete({ where: { id: workspaceId } });
-
-    await createAuditLog({
-      tenantId: currentUser.tenantId, userId: currentUser.id, action: 'DELETE', entity: 'Workspace', details: `Removeu workspace "${ws?.name}"`
+    const currentUser = await prisma.user.findUnique({ 
+        where: { email: session.user.email }, 
+        include: { tenant: true } 
     });
 
-    revalidatePath('/dashboard/settings'); revalidatePath('/dashboard');
+    if (!currentUser) return { error: "Erro de usuário" };
+
+    if (!checkPermission(currentUser.role, currentUser.tenant.settings, 'org_manage_workspaces')) {
+        return { error: "Sem permissão para gerenciar workspaces." };
+    }
+    
+    const cookieStore = await cookies();
+
+    try {
+        // USO DE TRANSAÇÃO: Tudo acontece ou nada acontece.
+        await prisma.$transaction(async (tx) => {
+            // 1. Verifica existência
+            const ws = await tx.workspace.findUnique({ 
+                where: { id: workspaceId }
+            });
+
+            if (!ws) throw new Error("Workspace não encontrado.");
+
+            // 2. Limpeza em Cascata Manual (Evita erros de FK)
+            // Ordem: Transações -> Metas/Orçamentos -> Contas/Cartões -> Membros -> Categorias
+            
+            await tx.transaction.deleteMany({ where: { workspaceId } });
+            await tx.goal.deleteMany({ where: { workspaceId } });
+            await tx.budget.deleteMany({ where: { workspaceId } });
+            await tx.creditCard.deleteMany({ where: { workspaceId } });
+            await tx.bankAccount.deleteMany({ where: { workspaceId } });
+            await tx.workspaceMember.deleteMany({ where: { workspaceId } });
+            await tx.category.deleteMany({ where: { workspaceId } });
+
+            // 3. Apaga o Workspace
+            await tx.workspace.delete({ where: { id: workspaceId } });
+
+            // 4. Cria o Log (Só cria se tudo acima funcionar)
+            await tx.auditLog.create({
+                data: {
+                    tenantId: currentUser.tenantId, 
+                    userId: currentUser.id, 
+                    action: 'DELETE', 
+                    entity: 'Workspace', 
+                    details: `Removeu workspace "${ws.name}" e todos os dados associados.`
+                }
+            });
+        });
+
+        // 5. Limpa cookie se necessário (fora da transação)
+        const activeId = cookieStore.get('activeWorkspaceId')?.value;
+        if (activeId === workspaceId) {
+            cookieStore.delete('activeWorkspaceId');
+        }
+
+    } catch (e: any) {
+        console.error("Erro fatal ao excluir workspace:", e);
+        return { error: "Erro ao excluir. Verifique se há dados dependentes ou tente novamente." };
+    }
+
+    revalidatePath('/dashboard/settings'); 
+    revalidatePath('/dashboard');
     return { success: true };
 }
 
@@ -298,8 +374,21 @@ export async function toggleWorkspaceAccess(userId: string, workspaceId: string,
       return { error: "Sem permissão." };
   }
 
+  const targetWorkspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true } });
+  const targetUser = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
+
+  if (!targetWorkspace || !targetUser) return { error: "Dados não encontrados." };
+
   if (hasAccess) {
     await prisma.workspaceMember.create({ data: { userId, workspaceId, role: 'MEMBER' } });
+    
+    // 🔔 TRIGGER
+    await sendNotification({
+        userId,
+        title: "Acesso Concedido 🔓",
+        message: `Você agora tem acesso ao workspace "${targetWorkspace.name}".`,
+        type: 'SUCCESS'
+    });
   } else {
     const count = await prisma.workspaceMember.count({ where: { userId } });
     if (count <= 1) return { error: "Usuário precisa ter pelo menos 1 workspace." };
@@ -307,7 +396,11 @@ export async function toggleWorkspaceAccess(userId: string, workspaceId: string,
   }
 
   await createAuditLog({
-      tenantId: currentUser.tenantId, userId: currentUser.id, action: 'UPDATE', entity: 'Access', details: `${hasAccess ? 'Liberou' : 'Removeu'} acesso ao workspace ${workspaceId}`
+      tenantId: currentUser.tenantId, 
+      userId: currentUser.id, 
+      action: 'UPDATE', 
+      entity: 'Access', 
+      details: `${hasAccess ? 'Liberou' : 'Removeu'} acesso de ${targetUser.email} ao workspace "${targetWorkspace.name}"`
   });
 
   revalidatePath('/dashboard/settings');
@@ -335,7 +428,6 @@ export async function createTransaction(formData: FormData) {
   }
   const data = parsed.data;
   
-  // CORREÇÃO AQUI: Uso do Helper
   const cookieStore = await cookies();
   const workspaceId = resolveWorkspaceId(user, cookieStore);
   
@@ -349,24 +441,70 @@ export async function createTransaction(formData: FormData) {
       create: { name: data.category, type: data.type, workspaceId } 
   });
 
+  // VARIÁVEL PARA CAPTURAR ID
+  let newTransactionId = "";
+
   if (data.paymentMethod === "ACCOUNT") {
     if (!data.accountId) return { error: "Conta não informada" };
-    await prisma.transaction.create({ 
+    const t = await prisma.transaction.create({ 
         data: { description: data.description, amount: data.amount, type: data.type, date, workspaceId, bankAccountId: data.accountId, categoryId: category.id, isPaid: true } 
     });
+    newTransactionId = t.id;
+    
     if (data.type === 'INCOME') await prisma.bankAccount.update({ where: { id: data.accountId }, data: { balance: { increment: data.amount } } });
     else await prisma.bankAccount.update({ where: { id: data.accountId }, data: { balance: { decrement: data.amount } } });
   } 
   else {
     if (!data.cardId) return { error: "Cartão não informado" };
-    await prisma.transaction.create({ 
+    const t = await prisma.transaction.create({ 
         data: { description: data.description, amount: data.amount, type: data.type, date, workspaceId, creditCardId: data.cardId, categoryId: category.id, isPaid: false } 
     });
+    newTransactionId = t.id;
+  }
+
+  // 🔔 TRIGGERS (Orçamento & Saldo)
+  if (data.type === 'EXPENSE' && category.id) {
+    const budget = await prisma.budget.findFirst({
+      where: { workspaceId, categoryId: category.id }
+    });
+
+    if (budget) {
+      const now = new Date();
+      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+      const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+
+      const aggregations = await prisma.transaction.aggregate({
+        where: { workspaceId, categoryId: category.id, type: 'EXPENSE', date: { gte: firstDay, lte: lastDay } },
+        _sum: { amount: true }
+      });
+
+      const totalSpent = Number(aggregations._sum.amount || 0);
+      const target = Number(budget.targetAmount);
+      const percent = (totalSpent / target) * 100;
+
+      if (percent >= 100) {
+        await notifyWorkspaceMembers(workspaceId, `🚨 Orçamento Estourado: ${data.category}`, `O limite de R$ ${target} foi ultrapassado! Gasto atual: R$ ${totalSpent.toFixed(2)}.`, 'ERROR');
+      } else if (percent >= 80) {
+        await notifyWorkspaceMembers(workspaceId, `⚠️ Atenção ao Orçamento: ${data.category}`, `Você já consumiu ${percent.toFixed(0)}% do limite.`, 'WARNING');
+      }
+    }
+  }
+
+  if (data.paymentMethod === "ACCOUNT" && data.type === 'EXPENSE' && data.accountId) {
+    const account = await prisma.bankAccount.findUnique({ where: { id: data.accountId } });
+    if (account && Number(account.balance) < 0) {
+       await sendNotification({ userId: user.id, title: "Conta no Vermelho 📉", message: `A conta ${account.name} ficou negativa (R$ ${Number(account.balance).toFixed(2)}).`, type: 'ERROR', link: '/dashboard/accounts' });
+    }
   }
 
   const typePT = data.type === 'INCOME' ? 'Receita' : 'Despesa';
   await createAuditLog({
-      tenantId: user.tenantId, userId: user.id, action: 'CREATE', entity: 'Transaction', details: `${typePT}: ${data.description} (R$ ${data.amount})`
+      tenantId: user.tenantId, 
+      userId: user.id, 
+      action: 'CREATE', 
+      entity: 'Transaction', 
+      entityId: newTransactionId, // <--- ID AGORA PRESENTE
+      details: `${typePT}: ${data.description} (R$ ${data.amount})`
   });
 
   revalidatePath('/dashboard'); revalidatePath('/dashboard/transactions'); revalidatePath('/dashboard/cards'); revalidatePath('/dashboard/accounts'); revalidatePath('/dashboard/organization');
@@ -403,7 +541,12 @@ export async function updateTransaction(id: string, formData: FormData) {
   await prisma.transaction.update({ where: { id }, data: { description, amount, date, categoryId: category.id } });
   
   await createAuditLog({
-      tenantId: user.tenantId, userId: user.id, action: 'UPDATE', entity: 'Transaction', entityId: id, details: `Alterou: ${description} (R$ ${amount})`
+      tenantId: user.tenantId, 
+      userId: user.id, 
+      action: 'UPDATE', 
+      entity: 'Transaction', 
+      entityId: id, 
+      details: `Alterou: ${description} (R$ ${amount})`
   });
 
   revalidatePath('/dashboard/transactions'); revalidatePath('/dashboard'); revalidatePath('/dashboard/organization');
@@ -474,18 +617,22 @@ export async function createAccount(formData: FormData) {
   }
   const { name, bank, balance } = parsed.data;
 
-  // CORREÇÃO AQUI: Uso do Helper
   const cookieStore = await cookies();
   const workspaceId = resolveWorkspaceId(user, cookieStore);
   
   if (!workspaceId) return { error: "Nenhum workspace disponível." };
 
-  await prisma.bankAccount.create({
+  const account = await prisma.bankAccount.create({
     data: { name, bank, balance, workspaceId, isIncluded: true }
   });
 
   await createAuditLog({
-      tenantId: user.tenantId, userId: user.id, action: 'CREATE', entity: 'Account', details: `Criou conta: ${name} (${bank})`
+      tenantId: user.tenantId, 
+      userId: user.id, 
+      action: 'CREATE', 
+      entity: 'Account', 
+      entityId: account.id, // <--- ID CAPTURADO
+      details: `Criou conta: ${name} (${bank})`
   });
 
   revalidatePath('/dashboard/accounts'); revalidatePath('/dashboard/organization');
@@ -559,7 +706,6 @@ export async function createCreditCard(formData: FormData) {
   
   if (!checkPermission(user.role, user.tenant.settings, 'cards_create')) return { error: "Seu perfil não tem permissão." };
 
-  // CORREÇÃO CRÍTICA AQUI: Uso do Helper para evitar ID deletado do cookie
   const cookieStore = await cookies();
   const workspaceId = resolveWorkspaceId(user, cookieStore);
   
@@ -567,12 +713,17 @@ export async function createCreditCard(formData: FormData) {
 
   const name = formData.get("name") as string;
 
-  await prisma.creditCard.create({
+  const card = await prisma.creditCard.create({
     data: { name, bank: formData.get("bank") as string, limit: parseFloat(formData.get("limit") as string), closingDay: parseInt(formData.get("closingDay") as string), dueDay: parseInt(formData.get("dueDay") as string), workspaceId }
   });
 
   await createAuditLog({
-      tenantId: user.tenantId, userId: user.id, action: 'CREATE', entity: 'Card', details: `Criou cartão: ${name}`
+      tenantId: user.tenantId, 
+      userId: user.id, 
+      action: 'CREATE', 
+      entity: 'Card', 
+      entityId: card.id, // <--- ID CAPTURADO
+      details: `Criou cartão: ${name}`
   });
 
   revalidatePath('/dashboard/cards');
@@ -640,12 +791,19 @@ export async function payCreditCardInvoice(formData: FormData) {
   if (!card || !account) return { error: "Dados inválidos" };
 
   const category = await prisma.category.upsert({ where: { workspaceId_name: { workspaceId: card.workspaceId, name: "Pagamento de Fatura" } }, update: {}, create: { name: "Pagamento de Fatura", type: "EXPENSE", workspaceId: card.workspaceId } });
-  await prisma.transaction.create({ data: { description: `Pagamento Fatura - ${card.name}`, amount, type: "EXPENSE", date, workspaceId: card.workspaceId, bankAccountId: accountId, categoryId: category.id, isPaid: true } });
+  
+  const t = await prisma.transaction.create({ data: { description: `Pagamento Fatura - ${card.name}`, amount, type: "EXPENSE", date, workspaceId: card.workspaceId, bankAccountId: accountId, categoryId: category.id, isPaid: true } });
+  
   await prisma.bankAccount.update({ where: { id: accountId }, data: { balance: { decrement: amount } } });
   await prisma.transaction.updateMany({ where: { creditCardId: cardId, isPaid: false, date: { lte: date } }, data: { isPaid: true } });
   
   await createAuditLog({
-      tenantId: user.tenantId, userId: user.id, action: 'ACTION', entity: 'Card', details: `Pagou fatura ${card.name} (R$ ${amount})`
+      tenantId: user.tenantId, 
+      userId: user.id, 
+      action: 'ACTION', 
+      entity: 'Transaction', 
+      entityId: t.id, // Opcional, pode linkar a transação de pagamento
+      details: `Pagou fatura ${card.name} (R$ ${amount})`
   });
 
   revalidatePath('/dashboard'); revalidatePath('/dashboard/cards'); revalidatePath('/dashboard/accounts'); revalidatePath('/dashboard/transactions'); revalidatePath('/dashboard/organization');
@@ -666,7 +824,6 @@ export async function createBudget(formData: FormData) {
 
   if (!checkPermission(user.role, user.tenant.settings, 'budgets_create')) return { error: "Sem permissão." };
 
-  // CORREÇÃO AQUI: Uso do Helper
   const cookieStore = await cookies();
   const workspaceId = resolveWorkspaceId(user, cookieStore);
   
@@ -675,10 +832,15 @@ export async function createBudget(formData: FormData) {
   const categoryId = formData.get("categoryId") as string;
   const amount = parseFloat(formData.get("amount") as string);
   
-  await prisma.budget.create({ data: { name: "Orçamento Mensal", targetAmount: amount, workspaceId, categoryId } });
+  const budget = await prisma.budget.create({ data: { name: "Orçamento Mensal", targetAmount: amount, workspaceId, categoryId } });
 
   await createAuditLog({
-      tenantId: user.tenantId, userId: user.id, action: 'CREATE', entity: 'Budget', details: `Definiu orçamento de R$ ${amount}`
+      tenantId: user.tenantId, 
+      userId: user.id, 
+      action: 'CREATE', 
+      entity: 'Budget', 
+      entityId: budget.id, // <--- ID CAPTURADO
+      details: `Definiu orçamento de R$ ${amount}`
   });
 
   revalidatePath('/dashboard/budgets');
@@ -695,10 +857,19 @@ export async function updateBudget(id: string, formData: FormData) {
   if (!checkPermission(user.role, user.tenant.settings, 'budgets_edit')) return { error: "Sem permissão." };
 
   const amount = parseFloat(formData.get("amount") as string);
+  
+  const oldBudget = await prisma.budget.findUnique({ where: { id }, include: { category: true } });
+  if (!oldBudget) return { error: "Orçamento não encontrado" };
+
   await prisma.budget.update({ where: { id }, data: { targetAmount: amount } });
 
   await createAuditLog({
-      tenantId: user.tenantId, userId: user.id, action: 'UPDATE', entity: 'Budget', entityId: id, details: `Atualizou orçamento para R$ ${amount}`
+      tenantId: user.tenantId, 
+      userId: user.id, 
+      action: 'UPDATE', 
+      entity: 'Budget', 
+      entityId: id, 
+      details: `Atualizou orçamento de "${oldBudget.category?.name || 'Geral'}" para R$ ${amount}`
   });
 
   revalidatePath('/dashboard/budgets'); revalidatePath('/dashboard');
@@ -736,7 +907,6 @@ export async function createGoal(formData: FormData) {
   
   if (!user) return { error: "Erro de usuário" };
 
-  // CORREÇÃO AQUI: Uso do Helper
   const cookieStore = await cookies();
   const workspaceId = resolveWorkspaceId(user, cookieStore);
   
@@ -744,12 +914,17 @@ export async function createGoal(formData: FormData) {
 
   const name = formData.get("name") as string;
 
-  await prisma.goal.create({
+  const goal = await prisma.goal.create({
     data: { name, targetAmount: parseFloat(formData.get("targetAmount") as string), currentAmount: parseFloat(formData.get("currentAmount") as string) || 0, deadline: formData.get("deadline") ? new Date(formData.get("deadline") as string) : null, workspaceId }
   });
 
   await createAuditLog({
-      tenantId: user.tenantId, userId: user.id, action: 'CREATE', entity: 'Goal', details: `Criou meta: ${name}`
+      tenantId: user.tenantId, 
+      userId: user.id, 
+      action: 'CREATE', 
+      entity: 'Goal', 
+      entityId: goal.id, // <--- ID CAPTURADO
+      details: `Criou meta: ${name}`
   });
 
   revalidatePath('/dashboard/goals');
@@ -765,12 +940,17 @@ export async function createSharedGoal(formData: FormData) {
   if (!checkPermission(user.role, user.tenant.settings, 'org_view')) return { error: "Sem permissão." };
 
   const name = formData.get("name") as string;
-  await prisma.goal.create({
+  const goal = await prisma.goal.create({
     data: { name, targetAmount: parseFloat(formData.get("targetAmount") as string), currentAmount: 0, deadline: formData.get("deadline") ? new Date(formData.get("deadline") as string) : null, tenantId: user.tenantId, workspaceId: null }
   });
 
   await createAuditLog({
-      tenantId: user.tenantId, userId: user.id, action: 'CREATE', entity: 'Goal', details: `Criou meta COMPARTILHADA: ${name}`
+      tenantId: user.tenantId, 
+      userId: user.id, 
+      action: 'CREATE', 
+      entity: 'Goal', 
+      entityId: goal.id, // <--- ID CAPTURADO
+      details: `Criou meta COMPARTILHADA: ${name}`
   });
 
   revalidatePath('/dashboard/organization');
@@ -816,7 +996,11 @@ export async function addMoneyToGoal(goalId: string, amount: number, accountId: 
      }
      const title = `Meta Atingida! 🎉`;
      const message = `Parabéns, o objetivo "${updatedGoal.name}" foi totalmente concluído.`;
-     for (const userId of notificationUserIds) { await createNotification({ userId, title, message, type: "SUCCESS", link: "/dashboard/goals" }); }
+     
+     // 🔔 TRIGGER: Notifica todos os envolvidos
+     for (const userId of notificationUserIds) { 
+         await sendNotification({ userId, title, message, type: "SUCCESS", link: "/dashboard/goals" }); 
+     }
   }
 
   revalidatePath('/dashboard/goals'); revalidatePath('/dashboard/accounts'); revalidatePath('/dashboard/organization');
@@ -841,13 +1025,6 @@ export async function withdrawMoneyFromGoal(goalId: string, amount: number, acco
 // 7. CRONS E NOTIFICAÇÕES
 // ============================================================================
 
-interface NotificationPayload { userId: string; title: string; message: string; type: 'INFO' | 'WARNING' | 'SUCCESS' | 'ERROR' | string; link?: string; }
-async function createNotification(payload: NotificationPayload) {
-    if (!payload.userId) return;
-    await prisma.notification.create({ data: { userId: payload.userId, title: payload.title, message: payload.message, type: payload.type, link: payload.link, read: false } });
-    revalidatePath('/dashboard'); 
-}
-
 export async function checkDeadlinesAndSendAlerts() {
     const today = new Date();
     const thirtyDaysAgo = new Date();
@@ -865,7 +1042,7 @@ export async function checkDeadlinesAndSendAlerts() {
         const title = `Fatura Próxima: ${card.name}`;
         const message = `A fatura do cartão ${card.name} (Workspace: ${card.workspace.name}) vence em 5 dias (${alertDay.toString().padStart(2, '0')}).`;
         for (const member of members) {
-            await createNotification({ userId: member.id, title, message, type: "WARNING", link: "/dashboard/cards" });
+            await sendNotification({ userId: member.id, title, message, type: "WARNING", link: "/dashboard/cards" });
             alertCount++;
         }
     }
@@ -899,7 +1076,7 @@ export async function markAllNotificationsAsRead() {
 }
 
 // ============================================================================
-// 8. IMPORTAÇÃO (EXTRATOS) - ATUALIZADO
+// 8. IMPORTAÇÃO (EXTRATOS)
 // ============================================================================
 
 export async function importTransactions(
@@ -941,7 +1118,6 @@ export async function importTransactions(
 
         if (existing) continue;
 
-        // Categoria inteligente
         const categoryName = t.category && t.category.trim() !== "" ? t.category.trim() : "Importados";
 
         const category = await tx.category.upsert({

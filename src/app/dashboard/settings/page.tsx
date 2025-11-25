@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Building2, Save, Users, Shield, CreditCard, Trash2, Briefcase, ScrollText } from "lucide-react";
-import { updateTenantName, removeMember, deleteWorkspace } from "@/app/dashboard/actions";
+import { updateTenantName, removeMember } from "@/app/dashboard/actions";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { PermissionsForm } from "@/components/dashboard/settings/permissions-form";
 import { InviteMemberForm } from "@/components/dashboard/settings/invite-member-form";
@@ -16,7 +16,8 @@ import { ManageAccessModal } from "@/components/dashboard/settings/manage-access
 import { EditWorkspaceModal } from "@/components/dashboard/settings/edit-workspace-modal"; 
 import { EditRoleModal } from "@/components/dashboard/settings/edit-role-modal"; 
 import { AuditList } from "@/components/dashboard/settings/audit-list"; 
-import { BillingTab } from "@/components/dashboard/settings/billing-tab"; // <--- IMPORT NOVO
+import { BillingTab } from "@/components/dashboard/settings/billing-tab"; 
+import { DeleteWorkspaceDialog } from "@/components/dashboard/settings/delete-workspace-dialog"; // <--- Importado aqui
 import { DEFAULT_TENANT_SETTINGS } from "@/lib/permissions";
 
 export default async function SettingsPage() {
@@ -78,7 +79,6 @@ export default async function SettingsPage() {
              <Shield className="w-4 h-4 mr-2" /> Permissões & Roles
           </TabsTrigger>
           
-          {/* ABA HABILITADA PARA O DONO */}
           {isOwner && (
             <TabsTrigger 
                 value="billing" 
@@ -155,12 +155,10 @@ export default async function SettingsPage() {
                             </div>
                             <div className="flex items-center gap-1">
                                 {isAdmin && <EditWorkspaceModal workspace={ws} />}
+                                
+                                {/* Lógica para mostrar o botão apenas se houver mais de 1 workspace */}
                                 {isAdmin && tenant.workspaces.length > 1 && (
-                                    <form action={async () => { 'use server'; await deleteWorkspace(ws.id); }}>
-                                        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-rose-500 hover:bg-rose-500/10">
-                                            <Trash2 className="w-4 h-4" />
-                                        </Button>
-                                    </form>
+                                    <DeleteWorkspaceDialog workspaceId={ws.id} workspaceName={ws.name} />
                                 )}
                             </div>
                         </div>
@@ -221,7 +219,6 @@ export default async function SettingsPage() {
              <PermissionsForm settings={currentSettings} isOwner={isOwner} />
         </TabsContent>
 
-        {/* --- ABA DE COBRANÇA (NOVA) --- */}
         {isOwner && (
             <TabsContent value="billing" className="mt-6">
                 <BillingTab />

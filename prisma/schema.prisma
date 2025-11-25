@@ -19,12 +19,13 @@ model Tenant {
   createdAt          DateTime    @default(now())
   updatedAt          DateTime    @updatedAt
   
-  // --- GESTÃO DE ASSINATURA (NOVO) ---
-  subscriptionStatus String      @default("TRIAL") // ACTIVE, INACTIVE, TRIAL
-  planType           String      @default("FREE")  // MONTHLY, YEARLY
-  nextPayment        DateTime?                     // Data do próximo vencimento
-  mercadoPagoId      String?                       // ID do cliente no MP (opcional)
-  
+  // Soft Delete
+  deletedAt          DateTime?   // <--- NOVO CAMPO
+
+  subscriptionStatus String      @default("TRIAL") 
+  planType           String      @default("FREE")  
+  nextPayment        DateTime?
+  mercadoPagoId      String?
   settings           Json?       @default("{}") 
   
   users              User[]
@@ -39,6 +40,9 @@ model Workspace {
   description   String?
   color         String?           @default("#000000")
   
+  // Soft Delete
+  deletedAt     DateTime?         // <--- NOVO CAMPO
+
   tenantId      String
   tenant        Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   

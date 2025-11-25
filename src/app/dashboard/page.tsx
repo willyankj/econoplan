@@ -4,6 +4,11 @@ import { getUserWorkspace } from "@/lib/get-user-workspace";
 
 export const dynamic = 'force-dynamic';
 
+// --- HELPERS MATEMÁTICOS SEGUROS ---
+// Aceita number ou string, converte para number e multiplica por 100 para centavos
+const toCents = (val: number | string | any) => Math.round(Number(val) * 100);
+const fromCents = (val: number) => val / 100;
+
 export default async function DashboardPage({
   searchParams
 }: {
@@ -17,15 +22,18 @@ export default async function DashboardPage({
 
   // --- DADOS KPI E CONTAS ---
   const rawAccounts = await prisma.bankAccount.findMany({ where: { workspaceId }, orderBy: { name: 'asc' } });
+  // Aqui já convertemos balance para Number, então accounts[i].balance é number
   const accounts = rawAccounts.map(acc => ({ ...acc, balance: Number(acc.balance) }));
   
-  // CORREÇÃO: Soma segura usando inteiros (centavos) para evitar erros de ponto flutuante
-  const totalBalance = accounts.reduce((acc, account) => acc + Math.round(account.balance * 100), 0) / 100;
+  // Soma Segura em Centavos (account.balance já é number)
+  const totalBalanceCents = accounts.reduce((acc, account) => acc + toCents(account.balance), 0);
+  const totalBalance = fromCents(totalBalanceCents);
 
   const now = new Date();
   const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
 
+  // Transações vêm cruas do Prisma, então amount é Decimal
   const transactionsMonth = await prisma.transaction.findMany({
     where: {
       workspaceId,
@@ -33,14 +41,17 @@ export default async function DashboardPage({
     }
   });
 
-  // CORREÇÃO: Soma segura usando inteiros
-  const monthlyIncome = transactionsMonth
+  // CORREÇÃO: Convertemos t.amount para Number() antes de passar para toCents
+  const monthlyIncomeCents = transactionsMonth
     .filter(t => t.type === 'INCOME' && t.creditCardId === null)
-    .reduce((acc, t) => acc + Math.round(Number(t.amount) * 100), 0) / 100;
+    .reduce((acc, t) => acc + toCents(Number(t.amount)), 0);
 
-  const monthlyExpense = transactionsMonth
+  const monthlyExpenseCents = transactionsMonth
     .filter(t => t.type === 'EXPENSE' && t.creditCardId === null)
-    .reduce((acc, t) => acc + Math.round(Number(t.amount) * 100), 0) / 100;
+    .reduce((acc, t) => acc + toCents(Number(t.amount)), 0);
+
+  const monthlyIncome = fromCents(monthlyIncomeCents);
+  const monthlyExpense = fromCents(monthlyExpenseCents);
 
   // --- ORÇAMENTOS ---
   const budgets = await prisma.budget.findMany({ 
@@ -57,13 +68,13 @@ export default async function DashboardPage({
     }
   });
 
-  const expensesByCategory: Record<string, number> = {};
+  // Mapa de Despesas em Centavos
+  const expensesByCategoryCents: Record<string, number> = {};
   allExpensesMonth.forEach(t => {
     if (t.categoryId) {
-        // Soma segura por categoria
-        const currentVal = Math.round(Number(t.amount) * 100);
-        const prevVal = expensesByCategory[t.categoryId] ? Math.round(expensesByCategory[t.categoryId] * 100) : 0;
-        expensesByCategory[t.categoryId] = (prevVal + currentVal) / 100;
+        const amountCents = toCents(Number(t.amount));
+        const prevCents = expensesByCategoryCents[t.categoryId] || 0;
+        expensesByCategoryCents[t.categoryId] = prevCents + amountCents;
     }
   });
 
@@ -71,7 +82,7 @@ export default async function DashboardPage({
       id: b.id,
       categoryName: b.category?.name || 'Geral',
       target: Number(b.targetAmount),
-      spent: expensesByCategory[b.categoryId || ''] || 0
+      spent: fromCents(expensesByCategoryCents[b.categoryId || ''] || 0)
   }));
 
   // --- METAS ---
@@ -122,6 +133,7 @@ export default async function DashboardPage({
     orderBy: { date: 'asc' }
   });
 
+  // Processamento do Gráfico usando Centavos
   chartTransactions.forEach(t => {
     let key = '';
     if (chartRange === '30d') {
@@ -133,16 +145,16 @@ export default async function DashboardPage({
 
     if (chartMap.has(key)) {
        const entry = chartMap.get(key);
-       const val = Math.round(Number(t.amount) * 100); // Centavos
+       const valCents = toCents(Number(t.amount));
        
-       // Mantemos em centavos temporariamente
-       const currentInc = Math.round(entry.income * 100);
-       const currentExp = Math.round(entry.expense * 100);
+       // Armazenamos temporariamente em centavos dentro do objeto e convertemos no final
+       const currentIncCents = toCents(entry.income);
+       const currentExpCents = toCents(entry.expense);
 
        if (t.type === 'INCOME') {
-           entry.income = (currentInc + val) / 100;
+           entry.income = fromCents(currentIncCents + valCents);
        } else {
-           entry.expense = (currentExp + val) / 100;
+           entry.expense = fromCents(currentExpCents + valCents);
        }
     }
   });

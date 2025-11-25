@@ -3,9 +3,8 @@
 import { useState } from 'react';
 import { Button } from "@/components/ui/button";
 import { Trash2, Loader2, AlertTriangle } from "lucide-react";
-import { deleteAccount } from '@/app/dashboard/actions';
+import { deleteWorkspace } from '@/app/dashboard/actions';
 import { toast } from "sonner";
-import { useRouter } from "next/navigation"; // <--- IMPORTANTE
 import {
   Dialog,
   DialogContent,
@@ -16,35 +15,43 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 
-interface DeleteAccountButtonProps {
-  id: string;
-  name: string;
+interface DeleteWorkspaceProps {
+  workspaceId: string;
+  workspaceName: string;
 }
 
-export function DeleteAccountButton({ id, name }: DeleteAccountButtonProps) {
+export function DeleteWorkspaceDialog({ workspaceId, workspaceName }: DeleteWorkspaceProps) {
   const [open, setOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const router = useRouter(); // <--- IMPORTANTE
 
   const handleDelete = async () => {
     setIsLoading(true);
-    const result = await deleteAccount(id);
-    setIsLoading(false);
-
-    if (result?.error) {
-        toast.error("Erro ao excluir", { description: result.error });
-    } else {
-        toast.success("Conta excluída com sucesso.");
-        setOpen(false);
-        router.refresh(); // <--- IMPORTANTE: Atualiza a tela visualmente
+    try {
+        const result = await deleteWorkspace(workspaceId);
+        
+        if (result?.error) {
+            toast.error("Não foi possível excluir", { description: result.error });
+        } else {
+            toast.success("Workspace excluído com sucesso!");
+            setOpen(false);
+        }
+    } catch (error) {
+        toast.error("Erro inesperado ao tentar excluir.");
+    } finally {
+        setIsLoading(false);
     }
   };
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10">
-          <Trash2 className="w-4 h-4" />
+        <Button 
+            variant="ghost" 
+            size="icon" 
+            className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+            type="button" // Garante que não submeta formulários externos
+        >
+            <Trash2 className="w-4 h-4" />
         </Button>
       </DialogTrigger>
       
@@ -52,10 +59,10 @@ export function DeleteAccountButton({ id, name }: DeleteAccountButtonProps) {
         <DialogHeader>
           <DialogTitle className="text-foreground flex items-center gap-2">
             <AlertTriangle className="h-5 w-5 text-destructive" />
-            Excluir Conta Bancária
+            Excluir Workspace
           </DialogTitle>
           <DialogDescription className="text-muted-foreground">
-            Você está prestes a excluir a conta <strong>{name}</strong>.
+            Você tem certeza que deseja excluir <strong>{workspaceName}</strong>?
           </DialogDescription>
         </DialogHeader>
 
@@ -64,12 +71,17 @@ export function DeleteAccountButton({ id, name }: DeleteAccountButtonProps) {
             ⚠️ Atenção: Esta ação é irreversível!
           </p>
           <p>
-            Ao confirmar, o sistema apagará automaticamente todo o histórico de receitas e despesas vinculadas a esta conta.
+            Ao confirmar, o sistema apagará <strong>permanentemente</strong> todas as contas bancárias, cartões, transações e metas vinculadas a este workspace.
           </p>
         </div>
 
         <DialogFooter className="gap-2 sm:gap-0">
-          <Button variant="ghost" onClick={() => setOpen(false)} className="text-muted-foreground hover:text-foreground hover:bg-muted">
+          <Button 
+            variant="ghost" 
+            onClick={() => setOpen(false)} 
+            className="text-muted-foreground hover:text-foreground hover:bg-muted"
+            disabled={isLoading}
+          >
             Cancelar
           </Button>
           <Button 

@@ -9,6 +9,7 @@ import { deleteGoal } from "@/app/dashboard/actions";
 import { NewGoalModal } from "@/components/dashboard/goals/new-goal-modal";
 import { EditGoalModal } from "@/components/dashboard/goals/edit-goal-modal";
 import { GoalInfoDialog } from "@/components/dashboard/goals/goal-info-dialog";
+import { formatCurrency } from "@/lib/utils"; // <--- Importado
 
 export default async function GoalsPage() {
   const { workspaceId, user } = await getUserWorkspace();
@@ -34,8 +35,6 @@ export default async function GoalsPage() {
 
   const rawAccounts = await prisma.bankAccount.findMany({ where: { workspaceId } });
   const accountsClean = rawAccounts.map(a => ({...a, balance: Number(a.balance)}));
-
-  const formatCurrency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
 
   return (
     <div className="space-y-6">

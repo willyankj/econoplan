@@ -6,6 +6,7 @@ import { BankLogo } from "@/components/ui/bank-logo";
 import { PayInvoiceModal } from "@/components/dashboard/cards/pay-invoice-modal";
 import { CardActions } from "@/components/dashboard/cards/card-actions";
 import { getUserWorkspace } from "@/lib/get-user-workspace";
+import { formatCurrency } from "@/lib/utils"; // <--- Importado
 
 export default async function CardsPage() {
   const { workspaceId } = await getUserWorkspace();
@@ -28,10 +29,6 @@ export default async function CardsPage() {
     limit: Number(c.limit),
     transactions: c.transactions.map(t => ({ ...t, amount: Number(t.amount), isPaid: t.isPaid }))
   }));
-
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
-  };
 
   return (
     <div className="space-y-6">
@@ -71,7 +68,6 @@ export default async function CardsPage() {
             const available = card.limit - currentInvoice; 
 
             return (
-                // CORREÇÃO: overflow-hidden (resolve o bug do desenho saindo)
                 <Card key={card.id} className="relative overflow-hidden bg-card border-border shadow-sm hover:border-primary/50 transition-all group">
                 
                 <div className="absolute top-0 right-0 w-40 h-40 bg-gradient-to-br from-blue-500/20 to-transparent rounded-bl-full -mr-10 -mt-10 pointer-events-none" />

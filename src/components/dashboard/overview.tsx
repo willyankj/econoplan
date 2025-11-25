@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { DepositGoalModal } from "@/components/dashboard/goals/deposit-goal-modal";
+import { formatCurrency } from "@/lib/utils"; // <--- Importado
 
 interface DashboardData {
   totalBalance: number;
@@ -19,7 +20,6 @@ interface DashboardData {
   monthlyExpense: number;
   chartData: { name: string; income: number; expense: number }[];
   lastTransactions: any[]; 
-  // CORREÇÃO: Agora é uma lista
   budgets: { id: string; categoryName: string; target: number; spent: number }[];
   goals: any[];
   accounts: any[];
@@ -34,10 +34,6 @@ export function DashboardOverview({ data }: { data: DashboardData }) {
     const params = new URLSearchParams(searchParams.toString());
     params.set('chartRange', value);
     router.push(`?${params.toString()}`, { scroll: false });
-  };
-  
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
   };
 
   const CustomTooltip = ({ active, payload, label }: any) => {

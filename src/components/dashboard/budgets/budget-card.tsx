@@ -8,6 +8,7 @@ import { deleteBudget } from "@/app/dashboard/actions";
 import { EditBudgetModal } from "./edit-budget-modal";
 import Link from "next/link";
 import { toast } from "sonner";
+import { formatCurrency } from "@/lib/utils"; // <--- Importado
 
 interface BudgetCardProps {
   budget: {
@@ -31,10 +32,6 @@ export function BudgetCard({ budget }: BudgetCardProps) {
   let progressColor = 'bg-emerald-500';
   if (percentage > 75) progressColor = 'bg-amber-500';
   if (percentage >= 100) progressColor = 'bg-rose-500';
-
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
-  };
 
   const handleDelete = async () => {
     if (!confirm("Tem certeza que deseja excluir este orçamento?")) return;

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from "react";
+import { useState, useEffect } from "react"; // Adicionado useEffect
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,6 +32,7 @@ export function TransactionFilterButton({ accounts = [], cards = [], categories 
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
 
+  // Estado inicial lê da URL
   const [filters, setFilters] = useState({
     type: searchParams.get('type') || 'ALL',
     source: searchParams.get('accountId') ? `acc_${searchParams.get('accountId')}` : 
@@ -40,6 +41,18 @@ export function TransactionFilterButton({ accounts = [], cards = [], categories 
     startDate: searchParams.get('from') || '',
     endDate: searchParams.get('to') || ''
   });
+
+  // Efeito para atualizar o estado interno se a URL mudar externamente (ex: clicou num link do dashboard)
+  useEffect(() => {
+    setFilters({
+        type: searchParams.get('type') || 'ALL',
+        source: searchParams.get('accountId') ? `acc_${searchParams.get('accountId')}` : 
+                searchParams.get('cardId') ? `card_${searchParams.get('cardId')}` : 'ALL',
+        categoryId: searchParams.get('categoryId') || 'ALL',
+        startDate: searchParams.get('from') || '',
+        endDate: searchParams.get('to') || ''
+    });
+  }, [searchParams]);
 
   const activeFiltersCount = [
     filters.type !== 'ALL',
@@ -84,7 +97,6 @@ export function TransactionFilterButton({ accounts = [], cards = [], categories 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        {/* CORREÇÃO DO BOTÃO */}
         <Button variant="outline" className="bg-background border-input hover:bg-accent hover:text-accent-foreground text-muted-foreground relative">
           <Filter className="w-4 h-4 mr-2" /> 
           Filtros
@@ -96,7 +108,6 @@ export function TransactionFilterButton({ accounts = [], cards = [], categories 
         </Button>
       </PopoverTrigger>
       
-      {/* CORREÇÃO DO POPOVER (FUNDO E TEXTO) */}
       <PopoverContent align="end" className="w-80 bg-popover border-border text-popover-foreground p-4 max-h-[90vh] overflow-y-auto shadow-lg">
         <div className="space-y-4">
           <div className="flex justify-between items-center">

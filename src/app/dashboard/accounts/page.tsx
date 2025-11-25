@@ -1,11 +1,10 @@
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Wallet, CreditCard, Trash2, Landmark, PlusCircle } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Wallet, CreditCard, Landmark } from "lucide-react";
 import { NewAccountModal } from "@/components/dashboard/accounts/new-account-modal";
 import { EditAccountModal } from "@/components/dashboard/accounts/edit-account-modal";
+import { DeleteAccountButton } from "@/components/dashboard/accounts/delete-account-button"; 
 import { BankLogo } from "@/components/ui/bank-logo";
-import { deleteAccount } from "@/app/dashboard/actions";
 import { getUserWorkspace } from "@/lib/get-user-workspace";
 
 export default async function AccountsPage() {
@@ -32,7 +31,6 @@ export default async function AccountsPage() {
         <NewAccountModal />
       </div>
 
-      {/* --- ESTADO VAZIO EXCLUSIVO (CONTAS) --- */}
       {accounts.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 px-4 border border-dashed border-emerald-500/30 rounded-2xl bg-emerald-500/5 text-center">
             <div className="w-20 h-20 bg-emerald-100 dark:bg-emerald-900/30 rounded-full flex items-center justify-center mb-6 shadow-sm">
@@ -76,15 +74,11 @@ export default async function AccountsPage() {
                     <div className="mt-6 flex justify-between items-center">
                         <p className="text-sm text-muted-foreground">{account.name}</p>
                         
-                        <div className="flex items-center">
-                        <EditAccountModal 
-                            account={{ ...account, balance: Number(account.balance) }} 
-                        />
-                        <form action={async () => { 'use server'; await deleteAccount(account.id); }}>
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-rose-500 hover:bg-rose-500/10">
-                            <Trash2 className="w-4 h-4" />
-                            </Button>
-                        </form>
+                        <div className="flex items-center gap-1">
+                            <EditAccountModal 
+                                account={{ ...account, balance: Number(account.balance) }} 
+                            />
+                            <DeleteAccountButton id={account.id} name={account.name} />
                         </div>
                     </div>
                 </CardContent>

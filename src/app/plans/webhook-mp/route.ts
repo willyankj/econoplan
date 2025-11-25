@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import MercadoPagoConfig, { Payment } from 'mercadopago';
 import { prisma } from "@/lib/prisma";
+import crypto from 'crypto';
 
 // MODO PRODUÇÃO
 const client = new MercadoPagoConfig({ 
@@ -8,13 +9,49 @@ const client = new MercadoPagoConfig({
     options: { timeout: 5000 } 
 });
 
+const WEBHOOK_SECRET = process.env.MP_WEBHOOK_SECRET;
+
 export async function POST(request: Request) {
     try {
         const url = new URL(request.url);
         const topic = url.searchParams.get("topic") || url.searchParams.get("type");
         const id = url.searchParams.get("id") || url.searchParams.get("data.id");
 
-        console.log(`[WEBHOOK] Recebido: ${topic} | ID: ${id}`);
+        // 1. VALIDAÇÃO DE ASSINATURA (HMAC)
+        // Se o segredo estiver configurado, validamos a origem
+        if (WEBHOOK_SECRET) {
+            const xSignature = request.headers.get("x-signature");
+            const xRequestId = request.headers.get("x-request-id");
+
+            if (!xSignature || !xRequestId) {
+                return NextResponse.json({ error: "Missing signature headers" }, { status: 401 });
+            }
+
+            // Extrai ts e v1 da assinatura (formato: ts=...;v1=...)
+            const parts = xSignature.split(';');
+            let ts = '';
+            let hash = '';
+
+            parts.forEach(part => {
+                const [key, value] = part.split('=');
+                if (key === 'ts') ts = value;
+                if (key === 'v1') hash = value;
+            });
+
+            // Cria o manifesto para assinar
+            const manifest = `id:${id};request-id:${xRequestId};ts:${ts};`;
+
+            // Gera o hash esperado
+            const hmac = crypto.createHmac('sha256', WEBHOOK_SECRET);
+            const digest = hmac.update(manifest).digest('hex');
+
+            if (digest !== hash) {
+                console.error("[WEBHOOK] Assinatura inválida.");
+                return NextResponse.json({ error: "Invalid signature" }, { status: 403 });
+            }
+        }
+
+        console.log(`[WEBHOOK] Recebido e Validado: ${topic} | ID: ${id}`);
 
         if (!id) return NextResponse.json({ received: true }, { status: 200 });
 
@@ -27,32 +64,24 @@ export async function POST(request: Request) {
                     const tenantId = paymentData.external_reference;
 
                     if (tenantId) {
-                        // 1. Busca o Tenant para saber a data atual de vencimento
                         const tenant = await prisma.tenant.findUnique({
                             where: { id: tenantId },
                             select: { nextPayment: true }
                         });
 
                         if (tenant) {
-                            // --- LÓGICA CORRIGIDA DE VENCIMENTO ---
                             const today = new Date();
-                            // Se existe vencimento futuro, usa ele como base. Se não (ou se já venceu), usa hoje.
                             let baseDate = today;
                             if (tenant.nextPayment && new Date(tenant.nextPayment) > today) {
                                 baseDate = new Date(tenant.nextPayment);
                             }
 
                             const nextPayment = new Date(baseDate);
-                            // Adiciona 1 mês à data base (hoje ou vencimento futuro)
                             nextPayment.setMonth(nextPayment.getMonth() + 1);
 
-                            // Correção para dias que não existem no mês seguinte (ex: 31/Jan -> Fev)
-                            // Se o dia do mês mudou, significa que o mês seguinte não tem aquele dia (ex: foi pra 02/Março)
-                            // Então voltamos para o último dia do mês anterior (28 ou 29/Fev)
                             if (nextPayment.getDate() !== baseDate.getDate()) {
                                 nextPayment.setDate(0); 
                             }
-                            // ------------------------------------------------
 
                             await prisma.tenant.update({
                                 where: { id: tenantId },
@@ -63,12 +92,12 @@ export async function POST(request: Request) {
                                     mercadoPagoId: id.toString()
                                 }
                             });
-                            console.log(`[WEBHOOK] SUCESSO! Tenant ${tenantId} renovado até ${nextPayment.toLocaleDateString('pt-BR')}.`);
+                            console.log(`[WEBHOOK] SUCESSO! Tenant ${tenantId} renovado.`);
                         }
                     }
                 }
             } catch (mpError) {
-                console.log(`[WEBHOOK] Erro ao buscar pagamento ${id} (pode ser teste):`, mpError);
+                console.log(`[WEBHOOK] Erro ao buscar pagamento ${id}:`, mpError);
             }
         }
 
