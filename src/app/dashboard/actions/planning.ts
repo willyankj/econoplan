@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
 import { createAuditLog } from "@/lib/audit";
 import { validateUser, getActiveWorkspaceId } from "@/lib/action-utils";
-import { sendNotification } from "@/lib/notifications";
+import { notifyInvoiceDue } from "@/lib/notifications"; 
 
 // === ORÇAMENTOS ===
 export async function upsertBudget(formData: FormData, id?: string) {
@@ -117,9 +117,17 @@ export async function moveMoneyGoal(goalId: string, amount: number, accountId: s
     const txType = isDeposit ? "EXPENSE" : "INCOME";
     const categoryName = isDeposit ? "Investimentos" : "Resgate Investimento";
 
+    // CORREÇÃO: Usando workspaceId_name_type e incluindo 'type'
     const category = await prisma.category.upsert({ 
-        where: { workspaceId_name: { workspaceId: account.workspaceId, name: categoryName } }, 
-        update: {}, create: { name: categoryName, type: txType, workspaceId: account.workspaceId } 
+        where: { 
+            workspaceId_name_type: { 
+                workspaceId: account.workspaceId, 
+                name: categoryName,
+                type: txType // Incluído
+            } 
+        }, 
+        update: {}, 
+        create: { name: categoryName, type: txType, workspaceId: account.workspaceId } 
     });
 
     await prisma.$transaction([
@@ -164,13 +172,22 @@ export async function checkDeadlinesAndSendAlerts() {
     alertDate.setDate(today.getDate() + 5);
     const alertDay = alertDate.getDate();
     
-    const cardsDue = await prisma.creditCard.findMany({ where: { dueDay: alertDay }, include: { workspace: true } });
+    const cardsDue = await prisma.creditCard.findMany({ 
+        where: { dueDay: alertDay }, 
+        include: { workspace: true } 
+    });
+    
     let count = 0;
     
     for (const card of cardsDue) {
-        const users = await prisma.user.findMany({ where: { tenantId: card.workspace.tenantId } });
+        // Busca todos os usuários do tenant dono do cartão
+        const users = await prisma.user.findMany({ 
+            where: { tenantId: card.workspace.tenantId } 
+        });
+
         for (const u of users) {
-            await sendNotification({ userId: u.id, title: "Fatura Próxima", message: `O cartão ${card.name} vence dia ${alertDay}`, type: "WARNING" });
+            // USA A FUNÇÃO CENTRALIZADA
+            await notifyInvoiceDue(u.id, card.name, alertDay);
             count++;
         }
     }

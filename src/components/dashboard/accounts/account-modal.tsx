@@ -20,16 +20,24 @@ export function AccountModal({ account }: AccountModalProps) {
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setIsLoading(true);
     const formData = new FormData(event.currentTarget);
     
+    // --- VALIDAÇÃO MANUAL PADRONIZADA ---
+    const name = formData.get("name")?.toString().trim();
+    const bank = formData.get("bank")?.toString().trim();
+
+    if (!name) return toast.error("O nome da conta é obrigatório.");
+    if (!bank) return toast.error("O nome do banco/instituição é obrigatório.");
+    // -------------------------------------
+
+    setIsLoading(true);
     const result = await upsertAccount(formData, account?.id);
-    
     setIsLoading(false);
+
     if (result?.error) {
-        toast.error("Erro", { description: result.error });
+        toast.error("Erro ao salvar conta", { description: result.error });
     } else {
-        toast.success(isEditing ? "Conta atualizada!" : "Conta criada!");
+        toast.success(isEditing ? "Conta atualizada com sucesso!" : "Conta criada com sucesso!");
         setOpen(false);
     }
   }
@@ -59,7 +67,6 @@ export function AccountModal({ account }: AccountModalProps) {
                 name="name" 
                 defaultValue={account?.name} 
                 placeholder="Ex: Conta Principal" 
-                required 
                 className="bg-muted border-border text-foreground placeholder:text-muted-foreground" 
             />
           </div>
@@ -70,7 +77,6 @@ export function AccountModal({ account }: AccountModalProps) {
                 name="bank" 
                 defaultValue={account?.bank} 
                 placeholder="Ex: Nubank" 
-                required 
                 className="bg-muted border-border text-foreground placeholder:text-muted-foreground" 
             />
           </div>

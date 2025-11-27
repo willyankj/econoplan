@@ -7,14 +7,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CreditCard, Plus, Pencil, Loader2 } from "lucide-react";
-import { upsertCard } from '@/app/dashboard/actions'; // Usa o arquivo index centralizado
+import { upsertCard } from '@/app/dashboard/actions'; 
 import { BankLogo } from "@/components/ui/bank-logo";
 import { toast } from "sonner";
 
 interface CardModalProps {
   accounts: any[];
-  card?: any; // Se passado, é edição
-  open?: boolean; // Opcional, se quiser controlar externamente
+  card?: any;
+  open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }
 
@@ -23,29 +23,41 @@ export function CardModal({ accounts, card, open: controlledOpen, onOpenChange }
   const [isLoading, setIsLoading] = useState(false);
   const isEditing = !!card;
   
-  // Lógica para usar estado controlado ou interno
   const isOpen = controlledOpen !== undefined ? controlledOpen : internalOpen;
   const setOpen = onOpenChange || setInternalOpen;
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setIsLoading(true);
     const formData = new FormData(event.currentTarget);
+
+    // --- VALIDAÇÃO MANUAL PADRONIZADA ---
+    const name = formData.get("name")?.toString().trim();
+    const bank = formData.get("bank")?.toString();
+    const limit = formData.get("limit")?.toString();
+    const closing = formData.get("closingDay")?.toString();
+    const due = formData.get("dueDay")?.toString();
+
+    if (!name) return toast.error("O apelido do cartão é obrigatório.");
+    if (!bank) return toast.error("Selecione o banco emissor.");
+    if (!limit || Number(limit) <= 0) return toast.error("Defina um limite válido.");
+    if (!closing) return toast.error("O dia de fechamento é obrigatório.");
+    if (!due) return toast.error("O dia de vencimento é obrigatório.");
+    // -------------------------------------
+
+    setIsLoading(true);
     const result = await upsertCard(formData, card?.id);
-    
     setIsLoading(false);
 
     if (result?.error) {
-        toast.error("Erro", { description: result.error });
+        toast.error("Erro ao salvar cartão", { description: result.error });
     } else {
-        toast.success(isEditing ? "Cartão atualizado" : "Cartão criado");
+        toast.success(isEditing ? "Cartão atualizado com sucesso!" : "Cartão criado com sucesso!");
         setOpen(false);
     }
   }
 
   return (
     <Dialog open={isOpen} onOpenChange={setOpen}>
-      {/* Se não houver controle externo, renderiza o botão de trigger padrão */}
       {!onOpenChange && (
           <DialogTrigger asChild>
             <Button className="bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm">
@@ -68,7 +80,6 @@ export function CardModal({ accounts, card, open: controlledOpen, onOpenChange }
                 name="name" 
                 defaultValue={card?.name} 
                 placeholder="Ex: Nubank Platinum" 
-                required 
                 className="bg-muted border-border text-foreground placeholder:text-muted-foreground" 
             />
           </div>
@@ -76,7 +87,7 @@ export function CardModal({ accounts, card, open: controlledOpen, onOpenChange }
           <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-2">
                 <Label>Banco</Label>
-                <Select name="bank" defaultValue={card?.bank} required>
+                <Select name="bank" defaultValue={card?.bank}>
                   <SelectTrigger className="bg-muted border-border text-foreground">
                     <SelectValue placeholder="Selecione..." />
                   </SelectTrigger>
@@ -104,7 +115,6 @@ export function CardModal({ accounts, card, open: controlledOpen, onOpenChange }
                     step="0.01" 
                     defaultValue={card?.limit} 
                     placeholder="5000.00" 
-                    required 
                     className="bg-muted border-border text-foreground placeholder:text-muted-foreground" 
                 />
             </div>
@@ -119,7 +129,6 @@ export function CardModal({ accounts, card, open: controlledOpen, onOpenChange }
                     min="1" max="31" 
                     defaultValue={card?.closingDay} 
                     placeholder="Ex: 05" 
-                    required 
                     className="bg-muted border-border text-foreground placeholder:text-muted-foreground" 
                 />
             </div>
@@ -131,7 +140,6 @@ export function CardModal({ accounts, card, open: controlledOpen, onOpenChange }
                     min="1" max="31" 
                     defaultValue={card?.dueDay} 
                     placeholder="Ex: 12" 
-                    required 
                     className="bg-muted border-border text-foreground placeholder:text-muted-foreground" 
                 />
             </div>

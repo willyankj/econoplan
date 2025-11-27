@@ -5,8 +5,8 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { 
   LayoutDashboard, TrendingUp, Settings, Target, CreditCard, 
-  Building2, Landmark, PieChart, ChevronRight, ChevronLeft, LogOut 
-} from 'lucide-react';
+  Building2, Landmark, PieChart, ChevronRight, ChevronLeft, LogOut, Tag 
+} from 'lucide-react'; // <--- ADICIONEI "Tag" AQUI
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { WorkspaceSwitcher } from '@/components/dashboard/workspace-switcher';
 import { ModeToggle } from '@/components/mode-toggle';
@@ -33,6 +33,9 @@ export function SidebarUI({ user, workspaces, activeWorkspaceId, tenantName, rol
   const navItems = [
     { href: '/dashboard', icon: LayoutDashboard, label: 'Visão Geral' },
     { href: '/dashboard/transactions', icon: TrendingUp, label: 'Extrato' },
+    // --- NOVO ITEM ADICIONADO ---
+    { href: '/dashboard/categories', icon: Tag, label: 'Categorias' },
+    // ----------------------------
     { href: '/dashboard/accounts', icon: Landmark, label: 'Contas Bancárias' },
     { href: '/dashboard/cards', icon: CreditCard, label: 'Meus Cartões' },
     { href: '/dashboard/budgets', icon: PieChart, label: 'Planejamento' },
@@ -140,7 +143,7 @@ export function SidebarUI({ user, workspaces, activeWorkspaceId, tenantName, rol
         })}
       </nav>
 
-      {/* User Footer (ONDE ESTAVA O PROBLEMA) */}
+      {/* User Footer */}
       <div className="p-4 border-t border-border bg-muted/30">
           <div className={cn("flex items-center gap-2", isCollapsed && "flex-col justify-center gap-4")}>
             
@@ -148,10 +151,6 @@ export function SidebarUI({ user, workspaces, activeWorkspaceId, tenantName, rol
 
             <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                {/* CORREÇÃO:
-                    1. min-w-0: Permite que o flex item encolha abaixo do seu tamanho de conteúdo (essencial para truncate funcionar).
-                    2. flex-1 (ao invés de w-full): Faz o botão ocupar apenas o espaço RESTANTE ao lado do ModeToggle.
-                */}
                 <button className={cn(
                     "flex items-center gap-3 hover:bg-muted p-2 rounded-lg transition-colors outline-none min-w-0",
                     isCollapsed ? "w-auto justify-center" : "flex-1"

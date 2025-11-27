@@ -175,7 +175,8 @@ model BankAccount {
 model Category {
   id            String          @id @default(uuid())
   name          String
-  icon          String?
+  icon          String?         @default("Tag") // Nome do ícone (Lucide)
+  color         String?         @default("#94a3b8") // Cor em Hex
   type          TransactionType
   
   workspaceId   String
@@ -191,7 +192,7 @@ model Category {
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
 
-  @@unique([workspaceId, name])
+  @@unique([workspaceId, name, type]) 
   @@index([workspaceId])
   @@index([parentId])
 }

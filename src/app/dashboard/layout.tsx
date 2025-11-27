@@ -6,8 +6,6 @@ import { cookies } from 'next/headers';
 
 import { SidebarUI } from '@/components/dashboard/sidebar-ui';
 import { MobileSidebar } from '@/components/dashboard/mobile-sidebar';
-// REMOVIDO: import { NewTransactionModal } from '@/components/dashboard/new-transaction-modal';
-// ADICIONADO:
 import { TransactionModal } from '@/components/dashboard/transaction-modal';
 
 import { NotificationBell } from "@/components/dashboard/notifications/notification-bell";
@@ -50,6 +48,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const rawCards = await prisma.creditCard.findMany({ where: { workspaceId: currentWorkspaceId }, orderBy: { name: 'asc' } });
   const cards = rawCards.map(card => ({ ...card, limit: Number(card.limit) }));
 
+  // CORREÇÃO: Busca de categorias adicionada
+  const categories = await prisma.category.findMany({ 
+      where: { workspaceId: currentWorkspaceId }, 
+      orderBy: { name: 'asc' } 
+  });
+
   const notifications = await getNotifications();
 
   return (
@@ -91,8 +95,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
             <div className="flex items-center gap-4">
                <NotificationBell notifications={notifications} />
-               {/* USANDO O NOVO MODAL EM MODO CRIAÇÃO (sem prop 'transaction') */}
-               <TransactionModal accounts={accounts} cards={cards} />
+               
+               {/* CORREÇÃO: Passando as categorias para o modal */}
+               <TransactionModal accounts={accounts} cards={cards} categories={categories} />
             </div>
         </header>
 

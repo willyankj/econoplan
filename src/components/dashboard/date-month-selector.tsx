@@ -4,92 +4,156 @@ import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { ChevronLeft, ChevronRight, Calendar as CalendarIcon } from "lucide-react";
+import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, X } from "lucide-react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { format, startOfMonth, endOfMonth, addMonths, subMonths, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { DateRange } from "react-day-picker";
 import { cn } from "@/lib/utils";
 
-export function DateMonthSelector() {
+interface DateMonthSelectorProps {
+  prefix?: string;
+  keysToReset?: string[];
+  className?: string;
+  isIconTrigger?: boolean; // <--- NOVA PROP
+}
+
+export function DateMonthSelector({ prefix = "", keysToReset = [], className, isIconTrigger = false }: DateMonthSelectorProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const [open, setOpen] = React.useState(false);
 
-  // 1. Ler parâmetros da URL
-  const paramMonth = searchParams.get('month');
-  const paramFrom = searchParams.get('from');
-  const paramTo = searchParams.get('to');
+  const keyMonth = prefix ? `${prefix}Month` : 'month';
+  const keyFrom = prefix ? `${prefix}From` : 'from';
+  const keyTo = prefix ? `${prefix}To` : 'to';
 
-  // 2. Determinar o estado atual
+  const paramMonth = searchParams.get(keyMonth);
+  const paramFrom = searchParams.get(keyFrom);
+  const paramTo = searchParams.get(keyTo);
+
   const today = new Date();
   let dateRef = today;
   
-  // Se tiver mês na URL, usa ele como referência
   if (paramMonth) {
     const [y, m] = paramMonth.split('-');
     dateRef = new Date(parseInt(y), parseInt(m) - 1, 1);
-  } 
-  // Se tiver Range, usa o 'from' como referência visual
-  else if (paramFrom) {
+  } else if (paramFrom) {
     dateRef = parseISO(paramFrom);
+  } else if (!prefix) {
+    const globalFrom = searchParams.get('from');
+    if (globalFrom && prefix) dateRef = parseISO(globalFrom);
   }
 
-  // Estado do Range do Calendário
   const [dateRange, setDateRange] = React.useState<DateRange | undefined>({
     from: paramFrom ? parseISO(paramFrom) : startOfMonth(dateRef),
     to: paramTo ? parseISO(paramTo) : endOfMonth(dateRef),
   });
 
-  // 3. Função para navegar apenas por Mês (Setas)
+  const clearKeys = (params: URLSearchParams) => {
+    keysToReset.forEach(key => {
+        params.delete(key);
+        params.delete(`${key}Month`);
+        params.delete(`${key}From`);
+        params.delete(`${key}To`);
+    });
+  };
+
   const handleNavigateMonth = (direction: 'prev' | 'next') => {
     const newDate = direction === 'prev' ? subMonths(dateRef, 1) : addMonths(dateRef, 1);
     const monthStr = format(newDate, 'yyyy-MM');
-    
     const params = new URLSearchParams(searchParams.toString());
-    params.set('month', monthStr);
-    params.delete('from'); // Limpa range personalizado ao usar setas
-    params.delete('to');
-    
-    router.push(`${pathname}?${params.toString()}`);
+    params.set(keyMonth, monthStr);
+    params.delete(keyFrom);
+    params.delete(keyTo);
+    clearKeys(params);
+    router.push(`${pathname}?${params.toString()}`, { scroll: false });
   };
 
-  // 4. Função ao selecionar no Calendário
   const handleRangeSelect = (range: DateRange | undefined) => {
     setDateRange(range);
-    
     if (range?.from) {
       const params = new URLSearchParams(searchParams.toString());
-      
       if (range.to) {
-        // Se temos as duas datas, aplica o filtro e fecha o popover
-        params.set('from', format(range.from, 'yyyy-MM-dd'));
-        params.set('to', format(range.to, 'yyyy-MM-dd'));
-        params.delete('month'); // Remove filtro de mês fixo
-        router.push(`${pathname}?${params.toString()}`);
-        // setOpen(false); // Opcional: fechar automático
+        params.set(keyFrom, format(range.from, 'yyyy-MM-dd'));
+        params.set(keyTo, format(range.to, 'yyyy-MM-dd'));
+        params.delete(keyMonth);
+        clearKeys(params);
+        router.push(`${pathname}?${params.toString()}`, { scroll: false });
+        setOpen(false);
       } else {
-        // Se só tem a data inicial selecionada
-        params.delete('month'); 
+        params.delete(keyMonth); 
       }
     }
   };
 
-  // 5. Texto de Exibição
+  const handleClear = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      const params = new URLSearchParams(searchParams.toString());
+      params.delete(keyFrom);
+      params.delete(keyTo);
+      params.delete(keyMonth);
+      router.push(`${pathname}?${params.toString()}`, { scroll: false });
+      setDateRange(undefined);
+  };
+
+  // --- ESTADO ATIVO ---
+  const isActive = !!(paramFrom && paramTo) || !!paramMonth;
+  
+  // --- MODO ÍCONE PURO (Hidden Style) ---
+  if (isIconTrigger) {
+      return (
+        <Popover open={open} onOpenChange={setOpen}>
+            <PopoverTrigger asChild>
+                <button 
+                    className={cn(
+                        "focus:outline-none transition-colors p-1 rounded-md hover:bg-muted", 
+                        isActive ? "text-blue-500" : "text-muted-foreground hover:text-foreground",
+                        className
+                    )}
+                    title="Filtrar gráfico"
+                >
+                    <CalendarIcon className="w-4 h-4" />
+                </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+                <div className="p-3 border-b border-border flex justify-between items-center">
+                    <span className="text-xs font-medium text-muted-foreground">Filtro do Gráfico</span>
+                    {isActive && (
+                        <button onClick={handleClear} className="text-xs text-rose-500 hover:underline">
+                            Limpar
+                        </button>
+                    )}
+                </div>
+                <Calendar
+                    initialFocus
+                    mode="range"
+                    defaultMonth={dateRef}
+                    selected={dateRange}
+                    onSelect={handleRangeSelect}
+                    numberOfMonths={1}
+                    locale={ptBR}
+                    className="p-3"
+                />
+            </PopoverContent>
+        </Popover>
+      );
+  }
+
+  // --- MODO PADRÃO (Botão com Texto e Setas) ---
   let label = "";
   if (paramFrom && paramTo) {
-    // Exibe: 13 nov - 22 nov, 2025
-    label = `${format(parseISO(paramFrom), "dd MMM", { locale: ptBR })} - ${format(parseISO(paramTo), "dd MMM, yyyy", { locale: ptBR })}`;
-  } else {
-    // Exibe: Novembro de 2025
+    label = `${format(parseISO(paramFrom), "dd MMM", { locale: ptBR })} - ${format(parseISO(paramTo), "dd MMM", { locale: ptBR })}`;
+  } else if (paramMonth) {
     label = format(dateRef, "MMMM 'de' yyyy", { locale: ptBR });
+  } else {
+    label = prefix ? "Seguir Geral" : format(today, "MMMM 'de' yyyy", { locale: ptBR });
   }
 
   return (
-    <div className="flex items-center gap-1 bg-card p-1 rounded-lg border border-border shadow-sm">
-      <Button variant="ghost" size="icon" onClick={() => handleNavigateMonth('prev')} className="h-8 w-8">
-        <ChevronLeft className="w-4 h-4" />
+    <div className={cn("flex items-center gap-1 bg-card p-1 rounded-lg border border-border shadow-sm", className)}>
+      <Button variant="ghost" size="icon" onClick={() => handleNavigateMonth('prev')} className="h-7 w-7">
+        <ChevronLeft className="w-3 h-3" />
       </Button>
       
       <Popover open={open} onOpenChange={setOpen}>
@@ -97,30 +161,36 @@ export function DateMonthSelector() {
           <Button
             variant="ghost"
             className={cn(
-              "h-8 px-3 text-sm font-medium capitalize min-w-[160px] justify-center",
-              (paramFrom && paramTo) && "text-emerald-500 hover:text-emerald-600"
+              "h-7 px-2 text-xs font-medium capitalize min-w-[110px] justify-center group relative",
+              isActive && prefix ? "text-blue-500" : "",
+              (!isActive && !prefix) && "text-foreground"
             )}
           >
-            <CalendarIcon className="mr-2 h-3.5 w-3.5 opacity-70" />
+            <CalendarIcon className={cn("mr-2 h-3 w-3 opacity-70", isActive && prefix && "text-blue-500")} />
             {label}
+            {prefix && isActive && (
+                <div onClick={handleClear} className="absolute right-1 p-0.5 rounded-full hover:bg-background/50 text-muted-foreground hover:text-foreground transition-colors">
+                    <X className="w-3 h-3" />
+                </div>
+            )}
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-auto p-0" align="center">
+        <PopoverContent className="w-auto p-0" align="end">
           <Calendar
             initialFocus
             mode="range"
             defaultMonth={dateRef}
             selected={dateRange}
             onSelect={handleRangeSelect}
-            numberOfMonths={1} // <--- ALTERADO PARA 1 MÊS
+            numberOfMonths={1}
             locale={ptBR}
             className="p-3"
           />
         </PopoverContent>
       </Popover>
 
-      <Button variant="ghost" size="icon" onClick={() => handleNavigateMonth('next')} className="h-8 w-8">
-        <ChevronRight className="w-4 h-4" />
+      <Button variant="ghost" size="icon" onClick={() => handleNavigateMonth('next')} className="h-7 w-7">
+        <ChevronRight className="w-3 h-3" />
       </Button>
     </div>
   );

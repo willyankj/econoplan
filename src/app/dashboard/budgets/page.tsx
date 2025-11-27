@@ -1,43 +1,53 @@
 import { prisma } from "@/lib/prisma";
-import { BudgetModal } from "@/components/dashboard/budgets/budget-modal"; // <--- NOVO
+import { BudgetModal } from "@/components/dashboard/budgets/budget-modal";
 import { BudgetCard } from "@/components/dashboard/budgets/budget-card";
-import { PieChart, ChevronLeft, ChevronRight } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import Link from "next/link";
+import { PieChart } from "lucide-react";
 import { getUserWorkspace } from "@/lib/get-user-workspace";
+import { DateMonthSelector } from "@/components/dashboard/date-month-selector"; // <--- 1. IMPORTAR
 
 export const dynamic = 'force-dynamic';
 
 export default async function BudgetsPage({
   searchParams
 }: {
-  searchParams: Promise<{ month?: string }>
+  searchParams: Promise<{ month?: string, from?: string, to?: string }> // <--- 2. TIPAGEM ATUALIZADA
 }) {
   const { workspaceId } = await getUserWorkspace();
   if (!workspaceId) return <div>Selecione um workspace</div>;
 
   const params = await searchParams;
-  const now = new Date();
-  let currentDate = now;
   
-  if (params.month) {
-    const [y, m] = params.month.split('-');
-    currentDate = new Date(parseInt(y), parseInt(m) - 1, 1);
+  // --- 3. NOVA LÓGICA DE DATA (IGUAL À ORG) ---
+  const now = new Date();
+  let startDate: Date;
+  let endDate: Date;
+
+  if (params.from && params.to) {
+    // Intervalo personalizado
+    startDate = new Date(params.from + "T00:00:00");
+    endDate = new Date(params.to + "T23:59:59");
+  } else {
+    // Mês Padrão
+    let dateRef = now;
+    if (params.month) {
+      const [y, m] = params.month.split('-');
+      dateRef = new Date(parseInt(y), parseInt(m) - 1, 1);
+    }
+    startDate = new Date(dateRef.getFullYear(), dateRef.getMonth(), 1);
+    endDate = new Date(dateRef.getFullYear(), dateRef.getMonth() + 1, 0, 23, 59, 59);
   }
-
-  const firstDay = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-  const lastDay = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
-
-  const prevMonth = new Date(currentDate); prevMonth.setMonth(prevMonth.getMonth() - 1);
-  const prevMonthStr = prevMonth.toISOString().slice(0, 7);
-  const nextMonth = new Date(currentDate); nextMonth.setMonth(nextMonth.getMonth() + 1);
-  const nextMonthStr = nextMonth.toISOString().slice(0, 7);
-  const monthLabel = currentDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+  // --------------------------------------------
 
   const categories = await prisma.category.findMany({ where: { workspaceId, type: 'EXPENSE' }, orderBy: { name: 'asc' } });
   const budgets = await prisma.budget.findMany({ where: { workspaceId }, include: { category: true } });
+  
+  // Usa startDate e endDate calculados acima
   const expenses = await prisma.transaction.findMany({
-    where: { workspaceId, type: 'EXPENSE', date: { gte: firstDay, lte: lastDay } }
+    where: { 
+        workspaceId, 
+        type: 'EXPENSE', 
+        date: { gte: startDate, lte: endDate } 
+    }
   });
 
   const expensesByCategory: Record<string, number> = {};
@@ -46,31 +56,28 @@ export default async function BudgetsPage({
   });
 
   const budgetData = budgets.map(b => ({
-    id: b.id, categoryId: b.categoryId, categoryName: b.category?.name || 'Sem categoria',
-    target: Number(b.targetAmount), spent: expensesByCategory[b.categoryId || ''] || 0,
-    dateFrom: firstDay.toISOString().split('T')[0], dateTo: lastDay.toISOString().split('T')[0]
+    id: b.id, 
+    categoryId: b.categoryId, 
+    categoryName: b.category?.name || 'Sem categoria',
+    target: Number(b.targetAmount), 
+    spent: expensesByCategory[b.categoryId || ''] || 0,
+    dateFrom: startDate.toISOString().split('T')[0], 
+    dateTo: endDate.toISOString().split('T')[0]
   }));
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row justify-between items-center gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-foreground">Planejamento Mensal</h2>
+          <h2 className="text-2xl font-bold text-foreground">Planejamento</h2>
           <p className="text-muted-foreground">Defina limites e controle seus gastos</p>
         </div>
         
-        <div className="flex items-center gap-4 bg-card p-1 rounded-lg border border-border shadow-sm">
-            <Link href={`?month=${prevMonthStr}`}>
-                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground"><ChevronLeft className="w-4 h-4" /></Button>
-            </Link>
-            <span className="text-sm font-medium capitalize min-w-[140px] text-center text-foreground">{monthLabel}</span>
-            <Link href={`?month=${nextMonthStr}`}>
-                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground"><ChevronRight className="w-4 h-4" /></Button>
-            </Link>
+        <div className="flex items-center gap-4">
+            {/* 4. COMPONENTE SUBSTITUÍDO */}
+            <DateMonthSelector /> 
+            <BudgetModal categories={categories} />
         </div>
-
-        {/* MUDANÇA: Usando BudgetModal unificado */}
-        <BudgetModal categories={categories} />
       </div>
 
       {budgetData.length === 0 ? (
@@ -82,7 +89,6 @@ export default async function BudgetsPage({
             <p className="text-sm max-w-md text-center mb-6">
                 Defina um teto para categorias como "Mercado" ou "Lazer" e o Econoplan te avisa antes do dinheiro acabar.
             </p>
-            {/* MUDANÇA: Usando BudgetModal unificado */}
             <BudgetModal categories={categories} />
          </div>
       ) : (

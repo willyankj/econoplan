@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { cookies } from 'next/headers';
 import { createAuditLog } from "@/lib/audit";
 import { validateUser } from "@/lib/action-utils";
-import { sendNotification } from "@/lib/notifications";
+import { notifyUserInvited } from "@/lib/notifications";
 
 export async function switchWorkspace(workspaceId: string) {
   const cookieStore = await cookies();
@@ -99,9 +99,16 @@ export async function inviteMember(formData: FormData) {
     targetUserId = newUser.id;
   }
 
-  await sendNotification({ userId: targetUserId, title: "Bem-vindo!", message: `Você foi convidado para o workspace "${targetWorkspace.name}".`, type: 'SUCCESS', link: '/dashboard' });
+await notifyUserInvited(targetUserId, targetWorkspace.name);
   
-  await createAuditLog({ tenantId: currentUser.tenantId, userId: currentUser.id, action: 'CREATE', entity: 'Member', details: `Convidou ${email} para ${targetWorkspace.name}` });
+  await createAuditLog({ 
+      tenantId: currentUser.tenantId, 
+      userId: currentUser.id, 
+      action: 'CREATE', 
+      entity: 'Member', 
+      details: `Convidou ${email} para ${targetWorkspace.name}` 
+  });
+  
   revalidatePath('/dashboard/settings');
   return { success: true };
 }

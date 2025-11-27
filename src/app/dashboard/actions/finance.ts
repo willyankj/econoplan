@@ -5,6 +5,8 @@ import { revalidatePath } from "next/cache";
 import { createAuditLog } from "@/lib/audit";
 import { validateUser, getActiveWorkspaceId } from "@/lib/action-utils";
 import { z } from "zod";
+// NOVO IMPORT
+import { notifyBudgetWarning, notifyBudgetExceeded } from "@/lib/notifications";
 
 const TransactionSchema = z.object({
   description: z.string().min(1),
@@ -16,6 +18,49 @@ const TransactionSchema = z.object({
   accountId: z.string().optional(),
   cardId: z.string().optional(),
 });
+
+// === FUNÇÃO AUXILIAR PARA VERIFICAR ORÇAMENTOS ===
+async function checkBudgetThresholds(userId: string, workspaceId: string, categoryId: string, date: Date) {
+    // 1. Busca se existe orçamento para esta categoria
+    const budget = await prisma.budget.findFirst({
+        where: { workspaceId, categoryId },
+        include: { category: true }
+    });
+
+    if (!budget) return;
+
+    // 2. Define o intervalo do mês da transação
+    const firstDay = new Date(date.getFullYear(), date.getMonth(), 1);
+    const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+
+    // 3. Soma todos os gastos dessa categoria no mês (incluindo o atual)
+    const result = await prisma.transaction.aggregate({
+        _sum: { amount: true },
+        where: {
+            workspaceId,
+            categoryId,
+            type: 'EXPENSE',
+            date: { gte: firstDay, lte: lastDay }
+        }
+    });
+
+    const totalSpent = Number(result._sum.amount || 0);
+    const target = Number(budget.targetAmount);
+
+    if (target <= 0) return;
+
+    const percentage = (totalSpent / target) * 100;
+    const categoryName = budget.category?.name || "Categoria";
+
+    // 4. Dispara notificações conforme as regras
+    if (percentage >= 100) {
+        // Severo: Estourou
+        await notifyBudgetExceeded(userId, categoryName);
+    } else if (percentage >= 90) {
+        // Warning: Quase lá (90% a 99%)
+        await notifyBudgetWarning(userId, categoryName, Math.round(percentage));
+    }
+}
 
 // === CONTAS ===
 export async function upsertAccount(formData: FormData, id?: string) {
@@ -48,7 +93,7 @@ export async function upsertAccount(formData: FormData, id?: string) {
   
   revalidatePath('/dashboard/accounts'); 
   revalidatePath('/dashboard');
-  revalidatePath('/dashboard/settings'); // Atualiza auditoria
+  revalidatePath('/dashboard/settings');
   return { success: true };
 }
 
@@ -132,8 +177,19 @@ export async function payCreditCardInvoice(formData: FormData) {
   if(!card) return { error: "Cartão inválido" };
 
   const category = await prisma.category.upsert({ 
-      where: { workspaceId_name: { workspaceId: card.workspaceId, name: "Pagamento de Fatura" } }, 
-      update: {}, create: { name: "Pagamento de Fatura", type: "EXPENSE", workspaceId: card.workspaceId } 
+      where: { 
+        workspaceId_name_type: { 
+          workspaceId: card.workspaceId, 
+          name: "Pagamento de Fatura", 
+          type: "EXPENSE" 
+        } 
+      }, 
+      update: {}, 
+      create: { 
+        name: "Pagamento de Fatura", 
+        type: "EXPENSE", 
+        workspaceId: card.workspaceId 
+      } 
   });
 
   await prisma.$transaction([
@@ -162,9 +218,14 @@ export async function upsertTransaction(formData: FormData, id?: string) {
   const data = parsed.data;
   const date = new Date(data.date + "T12:00:00");
 
+  let workspaceId = "";
+  let categoryId = "";
+
   if (id) {
     const oldT = await prisma.transaction.findUnique({ where: { id } });
     if (!oldT) return { error: "Erro" };
+
+    workspaceId = oldT.workspaceId;
 
     if (oldT.isPaid && oldT.bankAccountId) {
         const opRev = oldT.type === 'INCOME' ? 'decrement' : 'increment';
@@ -174,22 +235,39 @@ export async function upsertTransaction(formData: FormData, id?: string) {
     }
 
     const cat = await prisma.category.upsert({
-        where: { workspaceId_name: { workspaceId: oldT.workspaceId, name: data.category } },
-        update: {}, create: { name: data.category, type: data.type, workspaceId: oldT.workspaceId }
+        where: { 
+          workspaceId_name_type: { 
+            workspaceId: oldT.workspaceId, 
+            name: data.category, 
+            type: data.type 
+          } 
+        },
+        update: {}, 
+        create: { name: data.category, type: data.type, workspaceId: oldT.workspaceId }
     });
+    categoryId = cat.id;
 
     await prisma.transaction.update({ where: { id }, data: { description: data.description, amount: data.amount, date, categoryId: cat.id } });
     
     await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'UPDATE', entity: 'Transaction', entityId: id, details: `Atualizou: ${data.description}` });
   
   } else {
-    const workspaceId = await getActiveWorkspaceId(user);
-    if (!workspaceId) return { error: "Sem workspace" };
+    const wsId = await getActiveWorkspaceId(user);
+    if (!wsId) return { error: "Sem workspace" };
+    workspaceId = wsId;
 
     const cat = await prisma.category.upsert({
-        where: { workspaceId_name: { workspaceId, name: data.category } },
-        update: {}, create: { name: data.category, type: data.type, workspaceId }
+        where: { 
+          workspaceId_name_type: { 
+            workspaceId, 
+            name: data.category, 
+            type: data.type 
+          } 
+        },
+        update: {}, 
+        create: { name: data.category, type: data.type, workspaceId }
     });
+    categoryId = cat.id;
 
     let newTx;
 
@@ -208,6 +286,11 @@ export async function upsertTransaction(formData: FormData, id?: string) {
     if (newTx) {
         await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'CREATE', entity: 'Transaction', entityId: newTx.id, details: `Nova ${data.type === 'INCOME' ? 'Receita' : 'Despesa'}: ${data.description}` });
     }
+  }
+
+  // --- VERIFICAÇÃO DE ORÇAMENTO (NOVO) ---
+  if (data.type === 'EXPENSE' && categoryId && workspaceId) {
+      await checkBudgetThresholds(user.id, workspaceId, categoryId, date);
   }
 
   revalidatePath('/dashboard');
@@ -249,16 +332,29 @@ export async function importTransactions(accountId: string, transactions: any[])
             for (const t of transactions) {
                 const date = new Date(t.date);
                 const categoryName = t.category || "Importados";
+                const transactionType = t.amount >= 0 ? 'INCOME' : 'EXPENSE';
+
                 const cat = await tx.category.upsert({
-                    where: { workspaceId_name: { workspaceId: account.workspaceId, name: categoryName } },
-                    update: {}, create: { name: categoryName, type: t.amount >= 0 ? 'INCOME' : 'EXPENSE', workspaceId: account.workspaceId }
+                    where: { 
+                      workspaceId_name_type: { 
+                        workspaceId: account.workspaceId, 
+                        name: categoryName,
+                        type: transactionType
+                      } 
+                    },
+                    update: {}, 
+                    create: { 
+                      name: categoryName, 
+                      type: transactionType, 
+                      workspaceId: account.workspaceId 
+                    }
                 });
 
                 await tx.transaction.create({
-                    data: { description: t.description, amount: Math.abs(t.amount), type: t.amount >= 0 ? 'INCOME' : 'EXPENSE', date, workspaceId: account.workspaceId, bankAccountId: accountId, categoryId: cat.id, isPaid: true }
+                    data: { description: t.description, amount: Math.abs(t.amount), type: transactionType, date, workspaceId: account.workspaceId, bankAccountId: accountId, categoryId: cat.id, isPaid: true }
                 });
 
-                const op = t.amount >= 0 ? 'increment' : 'decrement';
+                const op = transactionType === 'INCOME' ? 'increment' : 'decrement';
                 await tx.bankAccount.update({ where: { id: accountId }, data: { balance: { [op]: Math.abs(t.amount) } } });
                 count++;
             }

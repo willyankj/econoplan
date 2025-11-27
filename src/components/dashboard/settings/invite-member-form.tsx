@@ -18,17 +18,24 @@ export function InviteMemberForm({ workspaces }: InviteMemberFormProps) {
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setIsLoading(true);
     const formData = new FormData(event.currentTarget);
     
+    // --- VALIDAÇÃO MANUAL PADRONIZADA ---
+    const email = formData.get("email")?.toString().trim();
+    const workspaceId = formData.get("workspaceId")?.toString();
+
+    if (!email) return toast.error("O e-mail é obrigatório.");
+    if (!workspaceId) return toast.error("Selecione um workspace de acesso.");
+    // -------------------------------------
+
+    setIsLoading(true);
     const result = await inviteMember(formData);
-    
     setIsLoading(false);
     
     if (result?.error) {
-        toast.error("Acesso Negado", { description: result.error });
+        toast.error("Não foi possível enviar o convite", { description: result.error });
     } else {
-        toast.success("Convite enviado/atualizado com sucesso.");
+        toast.success("Convite enviado com sucesso!");
         const form = event.target as HTMLFormElement;
         form.reset();
     }
@@ -49,13 +56,12 @@ export function InviteMemberForm({ workspaces }: InviteMemberFormProps) {
                 type="email" 
                 placeholder="usuario@gmail.com" 
                 className="bg-background border-input text-foreground h-9 text-sm placeholder:text-muted-foreground" 
-                required 
               />
           </div>
 
           <div className="w-full md:w-[200px] grid gap-2">
               <Label className="text-xs text-muted-foreground">Acesso ao Workspace</Label>
-              <Select name="workspaceId" required>
+              <Select name="workspaceId">
                   <SelectTrigger className="bg-background border-input text-foreground h-9">
                     <SelectValue placeholder="Selecione..." />
                   </SelectTrigger>

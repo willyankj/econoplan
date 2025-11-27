@@ -5,39 +5,62 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Plus, Pencil, Loader2 } from "lucide-react";
+import { Plus, Pencil, Loader2, CreditCard, Landmark } from "lucide-react";
 import { upsertTransaction } from '@/app/dashboard/actions';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { toast } from "sonner";
+import { CategoryCombobox } from '@/components/dashboard/categories/category-combobox';
+import { BankLogo } from "@/components/ui/bank-logo"; 
+import { toast } from "sonner"; // Garante o import do Sonner
 
 interface Props {
-  transaction?: any; // Se existir, é EDIT
-  accounts?: any[]; // Necessário para CREATE
-  cards?: any[];    // Necessário para CREATE
+  transaction?: any;
+  accounts?: any[];
+  cards?: any[];
+  categories?: any[];
 }
 
-export function TransactionModal({ transaction, accounts = [], cards = [] }: Props) {
+export function TransactionModal({ transaction, accounts = [], cards = [], categories = [] }: Props) {
   const [open, setOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   
-  // Estados para CREATE
   const [paymentMethod, setPaymentMethod] = useState('ACCOUNT');
   const [type, setType] = useState<'INCOME' | 'EXPENSE'>('EXPENSE');
 
   const isEditing = !!transaction;
+  const currentType = isEditing ? transaction.type : type;
+  
+  const availableCategories = categories.filter(c => c.type === currentType);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setIsLoading(true);
     const formData = new FormData(event.currentTarget);
     
-    // Se for CREATE, adiciona dados extras que não estão nos inputs visíveis
+    // --- VALIDAÇÃO MANUAL PADRONIZADA ---
+    const description = formData.get("description")?.toString().trim();
+    const amount = formData.get("amount")?.toString();
+    const date = formData.get("date")?.toString();
+    const category = formData.get("category")?.toString();
+
+    if (!description) return toast.error("A descrição é obrigatória.");
+    if (!amount || Number(amount) <= 0) return toast.error("O valor deve ser maior que zero.");
+    if (!date) return toast.error("A data é obrigatória.");
+    if (!category) return toast.error("Selecione uma categoria.");
+
+    if (!isEditing) {
+        const method = formData.get("paymentMethod"); // Hidden field logic handled by state usually, checking manual logic
+        // Validação específica de conta/cartão
+        if (paymentMethod === 'ACCOUNT' && !formData.get("accountId")) return toast.error("Selecione uma conta bancária.");
+        if (paymentMethod === 'CREDIT_CARD' && !formData.get("cardId")) return toast.error("Selecione um cartão de crédito.");
+    }
+    // -------------------------------------
+
+    setIsLoading(true);
+    
     if (!isEditing) {
         formData.append('type', type);
         formData.append('paymentMethod', paymentMethod);
     } else {
-        // No edit, enviamos os dados originais para manter consistência
         formData.append('type', transaction.type);
     }
 
@@ -46,7 +69,7 @@ export function TransactionModal({ transaction, accounts = [], cards = [] }: Pro
 
     if (result?.error) toast.error(result.error);
     else {
-        toast.success(isEditing ? "Atualizado!" : "Criado!");
+        toast.success(isEditing ? "Transação atualizada com sucesso!" : "Transação criada com sucesso!");
         setOpen(false);
     }
   }
@@ -71,34 +94,64 @@ export function TransactionModal({ transaction, accounts = [], cards = [] }: Pro
           <DialogTitle>{isEditing ? "Editar Transação" : "Nova Transação"}</DialogTitle>
         </DialogHeader>
         
+        {/* removemos 'required' dos inputs para o toast assumir o controle */}
         <form onSubmit={handleSubmit} className="grid gap-4 py-2">
           
-          {/* SELETORES DE TIPO (SÓ APARECEM NO CREATE) */}
           {!isEditing && (
              <div className="grid grid-cols-2 gap-2 bg-muted p-1 rounded-lg">
-                {/* Botões Receita/Despesa ... */}
-                <button type="button" onClick={() => setType('INCOME')} className={`py-2 rounded text-sm ${type === 'INCOME' ? 'bg-emerald-600 text-white' : ''}`}>Receita</button>
-                <button type="button" onClick={() => setType('EXPENSE')} className={`py-2 rounded text-sm ${type === 'EXPENSE' ? 'bg-rose-600 text-white' : ''}`}>Despesa</button>
+                <button type="button" onClick={() => setType('INCOME')} className={`py-2 rounded-md text-sm font-medium transition-all ${type === 'INCOME' ? 'bg-emerald-600 text-white shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>Receita</button>
+                <button type="button" onClick={() => setType('EXPENSE')} className={`py-2 rounded-md text-sm font-medium transition-all ${type === 'EXPENSE' ? 'bg-rose-600 text-white shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>Despesa</button>
              </div>
           )}
 
-          {/* ABAS CONTA/CARTÃO (SÓ APARECEM NO CREATE) */}
           {!isEditing && (
              <Tabs value={paymentMethod} onValueChange={setPaymentMethod}>
-                <TabsList className="grid w-full grid-cols-2">
-                    <TabsTrigger value="ACCOUNT">Conta</TabsTrigger>
-                    <TabsTrigger value="CREDIT_CARD" disabled={type === 'INCOME'}>Cartão</TabsTrigger>
+                <TabsList className="grid w-full grid-cols-2 bg-muted/50 border border-border p-1">
+                    <TabsTrigger value="ACCOUNT" className="data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm text-muted-foreground/70">
+                        <Landmark className="w-4 h-4 mr-2" /> Conta
+                    </TabsTrigger>
+                    <TabsTrigger value="CREDIT_CARD" disabled={type === 'INCOME'} className="data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm text-muted-foreground/70">
+                        <CreditCard className="w-4 h-4 mr-2" /> Cartão
+                    </TabsTrigger>
                 </TabsList>
-                <TabsContent value="ACCOUNT">
+
+                <TabsContent value="ACCOUNT" className="mt-3">
                     <Select name="accountId">
-                        <SelectTrigger><SelectValue placeholder="Selecione a conta" /></SelectTrigger>
-                        <SelectContent>{accounts.map(a => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}</SelectContent>
+                        <SelectTrigger className="bg-muted/50 border-border text-foreground font-medium h-11">
+                            <SelectValue placeholder="Selecione a conta" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {accounts.map(a => (
+                                <SelectItem key={a.id} value={a.id}>
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-6 h-6 flex items-center justify-center rounded bg-white/5 p-0.5">
+                                            <BankLogo bankName={a.bank} className="w-full h-full object-contain" />
+                                        </div>
+                                        <span className="text-foreground font-medium">{a.name}</span>
+                                    </div>
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
                     </Select>
                 </TabsContent>
-                <TabsContent value="CREDIT_CARD">
+
+                <TabsContent value="CREDIT_CARD" className="mt-3">
                     <Select name="cardId">
-                        <SelectTrigger><SelectValue placeholder="Selecione o cartão" /></SelectTrigger>
-                        <SelectContent>{cards.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+                        <SelectTrigger className="bg-muted/50 border-border text-foreground font-medium h-11">
+                            <SelectValue placeholder="Selecione o cartão" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {cards.map(c => (
+                                <SelectItem key={c.id} value={c.id}>
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-6 h-6 flex items-center justify-center rounded bg-white/5 p-0.5">
+                                            <BankLogo bankName={c.bank} className="w-full h-full object-contain" />
+                                        </div>
+                                        <span className="text-foreground font-medium">{c.name}</span>
+                                    </div>
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
                     </Select>
                 </TabsContent>
              </Tabs>
@@ -106,27 +159,31 @@ export function TransactionModal({ transaction, accounts = [], cards = [] }: Pro
 
           <div className="grid gap-2">
             <Label>Descrição</Label>
-            <Input name="description" defaultValue={transaction?.description} required className="bg-muted border-border text-foreground" />
+            <Input name="description" defaultValue={transaction?.description} className="bg-muted/50 border-border text-foreground h-11" placeholder="Ex: Compras do mês" />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-2">
                 <Label>Valor (R$)</Label>
-                <Input name="amount" type="number" step="0.01" defaultValue={transaction ? Number(transaction.amount) : ''} required className="bg-muted border-border text-foreground" />
+                <Input name="amount" type="number" step="0.01" defaultValue={transaction ? Number(transaction.amount) : ''} className="bg-muted/50 border-border text-foreground h-11 font-bold" placeholder="0,00" />
             </div>
             <div className="grid gap-2">
                 <Label>Data</Label>
-                <Input name="date" type="date" defaultValue={defaultDate} required className="bg-muted border-border text-foreground" />
+                <Input name="date" type="date" defaultValue={defaultDate} className="bg-muted/50 border-border text-foreground h-11" />
             </div>
           </div>
 
           <div className="grid gap-2">
             <Label>Categoria</Label>
-            <Input name="category" defaultValue={transaction?.category?.name} required className="bg-muted border-border text-foreground" />
+            <CategoryCombobox 
+                categories={availableCategories} 
+                type={currentType}
+                defaultValue={transaction?.category?.name || ''}
+            />
           </div>
 
-          <Button type="submit" disabled={isLoading} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white mt-2">
-            {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : (isEditing ? 'Salvar' : 'Criar')}
+          <Button type="submit" disabled={isLoading} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white mt-2 h-11 font-semibold text-base">
+            {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : (isEditing ? 'Salvar Alterações' : 'Confirmar Transação')}
           </Button>
         </form>
       </DialogContent>

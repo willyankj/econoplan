@@ -1,18 +1,18 @@
 'use client';
 
-import { useRouter, useSearchParams } from 'next/navigation';
 import { 
-  ArrowUpRight, ArrowDownRight, DollarSign, ShieldCheck, PieChart, Calendar, Trophy, Target
+  ArrowUpRight, ArrowDownRight, DollarSign, ShieldCheck, PieChart, Target
 } from 'lucide-react';
 import { 
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer 
 } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { DepositGoalModal } from "@/components/dashboard/goals/deposit-goal-modal";
-import { formatCurrency } from "@/lib/utils"; // <--- Importado
+import { formatCurrency } from "@/lib/utils";
+import { DateMonthSelector } from "@/components/dashboard/date-month-selector";
+import { useRouter } from 'next/navigation';
 
 interface DashboardData {
   totalBalance: number;
@@ -27,14 +27,6 @@ interface DashboardData {
 
 export function DashboardOverview({ data }: { data: DashboardData }) {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const currentRange = searchParams.get('chartRange') || '6m';
-
-  const handleRangeChange = (value: string) => {
-    const params = new URLSearchParams(searchParams.toString());
-    params.set('chartRange', value);
-    router.push(`?${params.toString()}`, { scroll: false });
-  };
 
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
@@ -60,8 +52,11 @@ export function DashboardOverview({ data }: { data: DashboardData }) {
           <h2 className="text-2xl font-bold text-foreground">Visão Geral</h2>
           <p className="text-muted-foreground">Dados em tempo real do <span className="text-emerald-500">Econoplan</span></p>
         </div>
-        <div className="flex gap-2">
-           <span className="px-3 py-1 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-500 text-xs flex items-center gap-1">
+        <div className="flex gap-2 items-center">
+           {/* SELETOR GLOBAL (Reseta o chart) */}
+           <DateMonthSelector keysToReset={['chart']} />
+           
+           <span className="hidden md:flex px-3 py-1 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-500 text-xs items-center gap-1 h-8">
              <ShieldCheck className="w-3 h-3" /> Ambiente Seguro
            </span>
         </div>
@@ -70,7 +65,7 @@ export function DashboardOverview({ data }: { data: DashboardData }) {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card className="bg-card border-border shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Receitas (Mês)</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">Receitas (Período)</CardTitle>
             <div className="p-2 bg-emerald-500/10 rounded-lg"><ArrowUpRight className="w-4 h-4 text-emerald-500" /></div>
           </CardHeader>
           <CardContent>
@@ -80,7 +75,7 @@ export function DashboardOverview({ data }: { data: DashboardData }) {
 
         <Card className="bg-card border-border shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Despesas (Mês)</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">Despesas (Período)</CardTitle>
             <div className="p-2 bg-rose-500/10 rounded-lg"><ArrowDownRight className="w-4 h-4 text-rose-500" /></div>
           </CardHeader>
           <CardContent>
@@ -104,20 +99,15 @@ export function DashboardOverview({ data }: { data: DashboardData }) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
         <Card className="lg:col-span-2 bg-card border-border shadow-sm">
-          <div className="p-6 flex items-center justify-between">
+          <div className="p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-muted-foreground" />
+                {/* AQUI: Ícone agora é o Seletor "Escondido" */}
+                <DateMonthSelector 
+                    prefix="chart" 
+                    isIconTrigger={true} // Ativa o modo minimalista
+                />
                 <h3 className="font-semibold text-lg text-foreground">Fluxo de Caixa</h3>
             </div>
-            <Select value={currentRange} onValueChange={handleRangeChange}>
-                <SelectTrigger className="w-[160px]">
-                    <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                    <SelectItem value="30d">Últimos 30 Dias</SelectItem>
-                    <SelectItem value="6m">Últimos 6 Meses</SelectItem>
-                </SelectContent>
-            </Select>
           </div>
           <div className="h-[300px] w-full px-4">
             <ResponsiveContainer width="100%" height="100%">
@@ -144,7 +134,6 @@ export function DashboardOverview({ data }: { data: DashboardData }) {
         </Card>
 
         <div className="space-y-6">
-          {/* WIDGET DE ORÇAMENTOS (LISTA) */}
           <Card className="bg-card border-border shadow-sm">
             <div className="p-6">
                 <h3 className="font-semibold text-foreground mb-4 flex items-center gap-2">
@@ -183,7 +172,6 @@ export function DashboardOverview({ data }: { data: DashboardData }) {
             </div>
           </Card>
 
-          {/* WIDGET METAS */}
           <Card className="bg-card border-border shadow-sm">
             <div className="p-6">
                 <div className="flex justify-between items-center mb-4">
@@ -226,7 +214,6 @@ export function DashboardOverview({ data }: { data: DashboardData }) {
                 )}
             </div>
           </Card>
-
         </div>
       </div>
     </div>

@@ -6,9 +6,10 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CreditCard, CheckCircle2, Clock, CheckCheck } from "lucide-react";
+import * as Icons from "lucide-react"; // <--- IMPORT para renderizar ícones dinâmicos
 
 import { DeleteTransactionButton } from "./delete-button";
-import { TransactionModal } from "@/components/dashboard/transaction-modal"; // <--- NOVO IMPORT
+import { TransactionModal } from "@/components/dashboard/transaction-modal";
 import { TransactionFilterButton } from "./filter-button";
 import { SearchInput } from "./search-input";
 import { ExportButton } from "./export-button";
@@ -92,19 +93,19 @@ export default async function TransactionsPage({
           </p>
         </div>
           <div className="flex gap-2 w-full md:w-auto">
-            {!params.cardId && 
-              <>
+            {!params.cardId && (
                 <ImportTransactionsModal accounts={accounts} />
-                <TransactionFilterButton accounts={accounts} cards={cards} categories={categories} />
-              </>
-            }
+            )}
+            <TransactionFilterButton accounts={accounts} cards={cards} categories={categories} />
             <ExportButton data={transactionsForExport} />
           </div>
       </div>
 
       <Card className="bg-card border-border shadow-sm overflow-hidden mx-1">
-        <CardHeader className="border-b border-border bg-muted/40 px-6 py-4">
+        <CardHeader className="border-b border-border bg-muted/40 px-6 py-4 flex flex-row justify-between items-center">
             <SearchInput />
+            {/* BOTÃO DE NOVA TRANSAÇÃO: Agora recebe as categorias */}
+            <TransactionModal accounts={accounts} cards={cards} categories={categories} />
         </CardHeader>
         
         <CardContent className="p-0 w-full overflow-x-auto max-w-[calc(100vw-3rem)] md:max-w-none">
@@ -170,11 +171,23 @@ export default async function TransactionsPage({
                         )}
                     </TableCell>
 
+                    {/* COLUNA DE CATEGORIA ATUALIZADA */}
                     <TableCell>
-                        <Badge variant="outline" className="bg-muted text-muted-foreground border-border font-normal">
-                            {t.category?.name || 'Geral'}
+                        <Badge variant="outline" className="bg-muted text-muted-foreground border-border font-normal gap-1 pr-3">
+                            {(() => {
+                                if (!t.category) return <span>Geral</span>;
+                                // @ts-ignore
+                                const CatIcon = Icons[t.category.icon] || Icons.Tag;
+                                return (
+                                    <>
+                                        <CatIcon className="w-3 h-3" style={{ color: t.category.color || 'inherit' }} />
+                                        <span style={{ color: t.category.color || 'inherit' }}>{t.category.name}</span>
+                                    </>
+                                );
+                            })()}
                         </Badge>
                     </TableCell>
+                    
                     <TableCell className="text-muted-foreground">
                         {t.date.toLocaleDateString('pt-BR')}
                     </TableCell>
@@ -184,8 +197,8 @@ export default async function TransactionsPage({
                     
                     <TableCell className="text-right">
                         <div className="flex justify-end items-center gap-1">
-                            {/* USANDO O NOVO MODAL EM MODO EDIÇÃO */}
-                            <TransactionModal transaction={transactionForModal} />
+                            {/* MODAL DE EDIÇÃO: Agora recebe as categorias */}
+                            <TransactionModal transaction={transactionForModal} categories={categories} />
                             <DeleteTransactionButton id={t.id} />
                         </div>
                     </TableCell>
