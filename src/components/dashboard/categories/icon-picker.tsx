@@ -2,16 +2,8 @@
 
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import * as Icons from "lucide-react";
 import { cn } from "@/lib/utils";
-
-// Lista curada de ícones financeiros/comuns
-const AVAILABLE_ICONS = [
-  "Tag", "ShoppingBag", "ShoppingCart", "Utensils", "Car", "Bus", "Plane", 
-  "Home", "Zap", "Droplets", "Wifi", "Phone", "Stethoscope", "Heart", "Pill",
-  "GraduationCap", "Book", "Briefcase", "DollarSign", "PiggyBank", "TrendingUp", 
-  "Gift", "Gamepad2", "Music", "Tv", "Coffee", "Baby", "PawPrint", "Wrench"
-];
+import { AVAILABLE_ICONS, getIcon } from "@/lib/icons"; // <--- Import centralizado
 
 const AVAILABLE_COLORS = [
   "#94a3b8", // Slate (Padrão)
@@ -36,12 +28,10 @@ interface IconPickerProps {
 }
 
 export function IconPicker({ selectedIcon, selectedColor, onIconChange, onColorChange }: IconPickerProps) {
-  // @ts-ignore
-  const CurrentIcon = Icons[selectedIcon] || Icons.Tag;
+  const CurrentIcon = getIcon(selectedIcon);
 
   return (
     <div className="flex gap-2 w-full">
-      {/* Seletor de Ícone */}
       <Popover>
         <PopoverTrigger asChild>
           <Button variant="outline" className="w-12 h-10 p-0 shrink-0" style={{ color: selectedColor, borderColor: selectedColor }}>
@@ -51,8 +41,7 @@ export function IconPicker({ selectedIcon, selectedColor, onIconChange, onColorC
         <PopoverContent className="w-64 p-2 z-[200]">
           <div className="grid grid-cols-5 gap-1 max-h-[200px] overflow-y-auto">
             {AVAILABLE_ICONS.map(iconName => {
-              // @ts-ignore
-              const Icon = Icons[iconName];
+              const Icon = getIcon(iconName);
               return (
                 <button
                   key={iconName}
@@ -71,8 +60,6 @@ export function IconPicker({ selectedIcon, selectedColor, onIconChange, onColorC
         </PopoverContent>
       </Popover>
 
-      {/* Seletor de Cor */}
-      {/* min-w-0 é crucial aqui para o flex item não estourar o pai e permitir o scroll */}
       <div className="flex-1 min-w-0 flex items-center gap-1.5 overflow-x-auto p-1 no-scrollbar bg-muted/30 rounded-md border border-border">
         {AVAILABLE_COLORS.map(color => (
           <button
@@ -88,7 +75,6 @@ export function IconPicker({ selectedIcon, selectedColor, onIconChange, onColorC
         ))}
       </div>
       
-      {/* Inputs ocultos para o formulário */}
       <input type="hidden" name="icon" value={selectedIcon} />
       <input type="hidden" name="color" value={selectedColor} />
     </div>

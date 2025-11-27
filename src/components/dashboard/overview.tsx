@@ -1,7 +1,7 @@
 'use client';
 
 import { 
-  ArrowUpRight, ArrowDownRight, DollarSign, ShieldCheck, PieChart, Target
+  ArrowUpRight, ArrowDownRight, DollarSign, ShieldCheck, PieChart, Calendar, Target
 } from 'lucide-react';
 import { 
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer 
@@ -11,8 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { DepositGoalModal } from "@/components/dashboard/goals/deposit-goal-modal";
 import { formatCurrency } from "@/lib/utils";
-import { DateMonthSelector } from "@/components/dashboard/date-month-selector";
-import { useRouter } from 'next/navigation';
+import { InfoHelp } from "@/components/dashboard/info-help"; // <--- IMPORT NOVO
 
 interface DashboardData {
   totalBalance: number;
@@ -26,17 +25,16 @@ interface DashboardData {
 }
 
 export function DashboardOverview({ data }: { data: DashboardData }) {
-  const router = useRouter();
-
+  
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
       return (
-        <div className="bg-popover border border-border p-3 rounded-lg shadow-xl">
-          <p className="text-muted-foreground text-xs mb-2 pb-2 border-b border-border">{label}</p>
+        <div className="bg-popover border border-border p-3 rounded-lg shadow-xl text-xs">
+          <p className="text-muted-foreground mb-2 pb-2 border-b border-border">{label}</p>
           {payload.map((entry: any, index: number) => (
-            <div key={index} className="flex items-center justify-between gap-4 text-sm mb-1 last:mb-0">
+            <div key={index} className="flex items-center justify-between gap-4 mb-1 last:mb-0">
               <span className={`font-medium ${entry.name === 'Receitas' ? 'text-emerald-500' : 'text-rose-500'}`}>{entry.name}:</span>
-              <span className="text-popover-foreground font-bold">{formatCurrency(entry.value)}</span>
+              <span className="text-foreground font-bold">{formatCurrency(entry.value)}</span>
             </div>
           ))}
         </div>
@@ -53,9 +51,6 @@ export function DashboardOverview({ data }: { data: DashboardData }) {
           <p className="text-muted-foreground">Dados em tempo real do <span className="text-emerald-500">Econoplan</span></p>
         </div>
         <div className="flex gap-2 items-center">
-           {/* SELETOR GLOBAL (Reseta o chart) */}
-           <DateMonthSelector keysToReset={['chart']} />
-           
            <span className="hidden md:flex px-3 py-1 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-500 text-xs items-center gap-1 h-8">
              <ShieldCheck className="w-3 h-3" /> Ambiente Seguro
            </span>
@@ -65,7 +60,12 @@ export function DashboardOverview({ data }: { data: DashboardData }) {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card className="bg-card border-border shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Receitas (Período)</CardTitle>
+            <div className="flex items-center gap-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Receitas</CardTitle>
+                <InfoHelp title="Receitas do Período">
+                    Soma de todas as entradas (salários, vendas, transferências recebidas) no período selecionado.
+                </InfoHelp>
+            </div>
             <div className="p-2 bg-emerald-500/10 rounded-lg"><ArrowUpRight className="w-4 h-4 text-emerald-500" /></div>
           </CardHeader>
           <CardContent>
@@ -75,7 +75,12 @@ export function DashboardOverview({ data }: { data: DashboardData }) {
 
         <Card className="bg-card border-border shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Despesas (Período)</CardTitle>
+            <div className="flex items-center gap-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Despesas</CardTitle>
+                <InfoHelp title="Despesas do Período">
+                    Total de gastos (compras, contas pagas, saídas) no período. Inclui gastos no débito e pagamentos de fatura.
+                </InfoHelp>
+            </div>
             <div className="p-2 bg-rose-500/10 rounded-lg"><ArrowDownRight className="w-4 h-4 text-rose-500" /></div>
           </CardHeader>
           <CardContent>
@@ -85,7 +90,12 @@ export function DashboardOverview({ data }: { data: DashboardData }) {
 
         <Card className="bg-card border-border shadow-sm border-t-4 border-t-cyan-500">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Saldo Total</CardTitle>
+            <div className="flex items-center gap-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Saldo Total</CardTitle>
+                <InfoHelp title="Patrimônio Líquido">
+                    Soma atualizada de todas as suas contas bancárias cadastradas. Não considera limites de cartão de crédito.
+                </InfoHelp>
+            </div>
             <div className="p-2 bg-cyan-500/10 rounded-lg"><DollarSign className="w-4 h-4 text-cyan-500" /></div>
           </CardHeader>
           <CardContent>
@@ -99,15 +109,12 @@ export function DashboardOverview({ data }: { data: DashboardData }) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
         <Card className="lg:col-span-2 bg-card border-border shadow-sm">
-          <div className="p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-2">
-                {/* AQUI: Ícone agora é o Seletor "Escondido" */}
-                <DateMonthSelector 
-                    prefix="chart" 
-                    isIconTrigger={true} // Ativa o modo minimalista
-                />
-                <h3 className="font-semibold text-lg text-foreground">Fluxo de Caixa</h3>
-            </div>
+          <div className="p-6 flex items-center gap-2">
+             <Calendar className="w-4 h-4 text-muted-foreground" />
+             <h3 className="font-semibold text-lg text-foreground">Fluxo de Caixa</h3>
+             <InfoHelp title="Histórico Financeiro">
+                Acompanhe a evolução das suas entradas (verde) e saídas (vermelho) ao longo do tempo. Ideal para identificar meses com gastos atípicos.
+             </InfoHelp>
           </div>
           <div className="h-[300px] w-full px-4">
             <ResponsiveContainer width="100%" height="100%">
@@ -136,9 +143,13 @@ export function DashboardOverview({ data }: { data: DashboardData }) {
         <div className="space-y-6">
           <Card className="bg-card border-border shadow-sm">
             <div className="p-6">
-                <h3 className="font-semibold text-foreground mb-4 flex items-center gap-2">
-                <PieChart className="w-4 h-4 text-purple-500" /> Orçamentos
-                </h3>
+                <div className="flex items-center gap-2 mb-4">
+                    <PieChart className="w-4 h-4 text-purple-500" />
+                    <h3 className="font-semibold text-foreground">Orçamentos</h3>
+                    <InfoHelp title="Limites de Gastos">
+                        Monitore suas categorias. A barra mostra quanto você já consumiu do limite definido para o mês.
+                    </InfoHelp>
+                </div>
                 
                 {data.budgets.length === 0 ? (
                     <div className="text-center py-4 text-muted-foreground text-sm">
@@ -175,12 +186,13 @@ export function DashboardOverview({ data }: { data: DashboardData }) {
           <Card className="bg-card border-border shadow-sm">
             <div className="p-6">
                 <div className="flex justify-between items-center mb-4">
-                    <h3 className="font-semibold text-foreground flex items-center gap-2">
-                        <Target className="w-4 h-4 text-blue-500" /> Metas em Foco
-                    </h3>
-                    <Button variant="ghost" size="sm" className="h-6 text-xs text-blue-500 hover:text-blue-400" onClick={() => router.push('/dashboard/goals')}>
-                        Ver todas
-                    </Button>
+                    <div className="flex items-center gap-2">
+                        <Target className="w-4 h-4 text-blue-500" />
+                        <h3 className="font-semibold text-foreground">Metas em Foco</h3>
+                        <InfoHelp title="Objetivos Financeiros">
+                            Progresso dos seus sonhos. Use os botões para depositar ou sacar valores.
+                        </InfoHelp>
+                    </div>
                 </div>
 
                 {data.goals.length === 0 ? (

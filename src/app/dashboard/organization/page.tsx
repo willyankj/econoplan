@@ -2,9 +2,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Building2, TrendingUp, TrendingDown, Target, PieChart } from "lucide-react";
-import { Progress } from "@/components/ui/progress";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"; // <--- Adicionado CardDescription
+import { Building2, TrendingUp, TrendingDown, Target, PieChart, DollarSign } from "lucide-react";
 import { GoalModal } from "@/components/dashboard/goals/goal-modal";
 import { DepositGoalModal } from "@/components/dashboard/goals/deposit-goal-modal";
 import { checkPermission } from "@/lib/permissions";
@@ -12,6 +11,16 @@ import { TenantOverviewCharts } from "@/components/dashboard/organization/tenant
 import { TenantRecentTransactions } from "@/components/dashboard/organization/tenant-recent-transactions";
 import { DateMonthSelector } from "@/components/dashboard/date-month-selector";
 import { OrgFilters } from "@/components/dashboard/organization/org-filters";
+import { GoalAnalytics } from "@/components/dashboard/organization/goal-analytics"; 
+import { formatCurrency } from "@/lib/utils";
+import { InfoHelp } from "@/components/dashboard/info-help"; 
+
+// ANALYTICS
+import { getTenantOracleData, getTenantDebtXRayData, getTenantHealthScore } from "@/app/dashboard/actions/analytics";
+import { FinancialOracle } from "@/components/dashboard/analytics/financial-oracle";
+import { DebtXRay } from "@/components/dashboard/analytics/debt-xray";
+import { HealthScore } from "@/components/dashboard/analytics/health-score";
+import { Progress } from "@/components/ui/progress"; 
 
 export default async function OrganizationPage({
   searchParams
@@ -21,151 +30,67 @@ export default async function OrganizationPage({
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) redirect("/login");
 
-  const user = await prisma.user.findUnique({
-    where: { email: session.user.email },
-    include: { tenant: true }
-  });
-
+  const user = await prisma.user.findUnique({ where: { email: session.user.email }, include: { tenant: true } });
   if (!user) return <div>Erro.</div>;
-
   const hasAccess = checkPermission(user.role, user.tenant.settings, 'org_view');
   if (!hasAccess) redirect("/dashboard");
-
   const tenantId = user.tenantId;
   const params = await searchParams;
 
-  // --- FILTROS DE DATA E CONTEXTO ---
+  // Lógica de Datas (Resumida)
   const now = new Date();
-  let startDate: Date;
-  let endDate: Date;
-
-  // Lógica de Datas: Prioriza Range Personalizado (from/to) sobre Mês
-  if (params.from && params.to) {
-    // Força o horário para garantir cobertura total do dia (00:00:00 até 23:59:59)
-    startDate = new Date(params.from + "T00:00:00");
-    endDate = new Date(params.to + "T23:59:59");
-  } else {
-    // Fallback para Mês Padrão
-    let dateFilter = now;
-    if (params.month) {
-      const [y, m] = params.month.split('-');
-      dateFilter = new Date(parseInt(y), parseInt(m) - 1, 1);
-    }
-    startDate = new Date(dateFilter.getFullYear(), dateFilter.getMonth(), 1);
-    endDate = new Date(dateFilter.getFullYear(), dateFilter.getMonth() + 1, 0, 23, 59, 59);
+  let startDate, endDate;
+  if (params.from && params.to) { startDate = new Date(params.from+"T00:00:00"); endDate = new Date(params.to+"T23:59:59"); }
+  else { 
+      let d = now; if(params.month) { const [y,m] = params.month.split('-'); d = new Date(parseInt(y), parseInt(m)-1, 1); }
+      startDate = new Date(d.getFullYear(), d.getMonth(), 1); endDate = new Date(d.getFullYear(), d.getMonth()+1, 0, 23,59,59);
   }
 
-  const filterWorkspaceId = params.filterWorkspace && params.filterWorkspace !== 'ALL' ? params.filterWorkspace : undefined;
-  const filterType = params.filterType && params.filterType !== 'ALL' ? params.filterType : undefined;
+  const filterWorkspaceId = params.filterWorkspace !== 'ALL' ? params.filterWorkspace : undefined;
+  const filterType = params.filterType !== 'ALL' ? params.filterType : undefined;
 
-  // 1. BUSCA WORKSPACES
+  // BUSCAS DE DADOS
+  const oracleData = await getTenantOracleData();
+  const debtData = await getTenantDebtXRayData();
+  const healthData = await getTenantHealthScore();
+
   const workspaces = await prisma.workspace.findMany({
-    where: { 
-        tenantId,
-        ...(filterWorkspaceId && { id: filterWorkspaceId }) 
-    },
-    include: {
-      bankAccounts: true,
-      transactions: {
-        where: { 
-            date: { gte: startDate, lte: endDate },
-            ...(filterType && { type: filterType as any })
-        },
-        include: { category: true }
-      }
-    }
+    where: { tenantId, ...(filterWorkspaceId && { id: filterWorkspaceId }) },
+    include: { bankAccounts: true, transactions: { where: { date: { gte: startDate, lte: endDate }, ...(filterType && { type: filterType as any }) }, include: { category: true } } }
   });
 
-  const allWorkspaces = await prisma.workspace.findMany({
-      where: { tenantId },
-      select: { id: true, name: true }
-  });
+  const allWorkspaces = await prisma.workspace.findMany({ where: { tenantId }, select: { id: true, name: true } });
 
-  // 2. BUSCA TRANSAÇÕES RECENTES
   const recentTransactions = await prisma.transaction.findMany({
-    where: { 
-        workspace: { 
-            tenantId,
-            ...(filterWorkspaceId && { id: filterWorkspaceId }) 
-        },
-        date: { gte: startDate, lte: endDate },
-        ...(filterType && { type: filterType as any })
-    },
-    orderBy: { date: 'desc' },
-    take: 20,
-    include: { workspace: true, category: true }
+    where: { workspace: { tenantId, ...(filterWorkspaceId && { id: filterWorkspaceId }) }, date: { gte: startDate, lte: endDate }, ...(filterType && { type: filterType as any }) },
+    orderBy: { date: 'desc' }, take: 20, include: { workspace: true, category: true }
   });
 
-  // --- AGREGAÇÃO DE DADOS ---
-  let totalBalance = 0;
-  let totalIncome = 0;
-  let totalExpense = 0;
-  
+  // AGREGAR TOTAIS
+  let totalBalance = 0, totalIncome = 0, totalExpense = 0;
   const workspaceChartData: any[] = [];
   const categoryMap = new Map<string, number>();
 
   workspaces.forEach(ws => {
-    let wsBalance = 0;
-    ws.bankAccounts.forEach(acc => wsBalance += Number(acc.balance));
-    totalBalance += wsBalance;
-
-    let wsIncome = 0;
-    let wsExpense = 0;
-
+    let wsB = 0; ws.bankAccounts.forEach(a => wsB += Number(a.balance)); totalBalance += wsB;
+    let wsI = 0, wsE = 0;
     ws.transactions.forEach(t => {
-      const val = Number(t.amount);
-      
-      if (t.type === 'INCOME' && !t.creditCardId) {
-          totalIncome += val;
-          wsIncome += val;
-      }
-      if (t.type === 'EXPENSE' && !t.creditCardId) {
-          totalExpense += val;
-          wsExpense += val;
-
-          if (t.category) {
-            const current = categoryMap.get(t.category.name) || 0;
-            categoryMap.set(t.category.name, current + val);
-          }
-      }
+      const v = Number(t.amount);
+      if (t.type === 'INCOME' && !t.creditCardId) { totalIncome += v; wsI += v; }
+      if (t.type === 'EXPENSE' && !t.creditCardId) { totalExpense += v; wsE += v; if(t.category) categoryMap.set(t.category.name, (categoryMap.get(t.category.name)||0)+v); }
     });
-
-    workspaceChartData.push({
-        name: ws.name,
-        income: wsIncome,
-        expense: wsExpense
-    });
+    workspaceChartData.push({ name: ws.name, income: wsI, expense: wsE });
   });
-
   const categoryChartData = Array.from(categoryMap.entries()).map(([name, value]) => ({ name, value }));
 
-  // 3. METAS
-  const sharedGoals = await prisma.goal.findMany({
-    where: { tenantId },
-    include: { transactions: true },
-    orderBy: { createdAt: 'desc' }
-  });
-
-  const userWorkspaces = await prisma.workspaceMember.findMany({
-    where: { userId: user.id },
-    include: { workspace: { include: { bankAccounts: true } } }
-  });
+  // METAS
+  const sharedGoals = await prisma.goal.findMany({ where: { tenantId }, include: { transactions: true }, orderBy: { createdAt: 'desc' } });
+  const goalsWithDetails = sharedGoals.map(g => ({ ...g, targetAmount: Number(g.targetAmount), currentAmount: Number(g.currentAmount), transactions: g.transactions.map(t => ({...t, amount: Number(t.amount)})) }));
   
-  const allUserAccounts = userWorkspaces.flatMap(wm => 
-    wm.workspace.bankAccounts.map(acc => ({...acc, balance: Number(acc.balance), workspaceName: wm.workspace.name}))
-  );
-
-  const formatCurrency = (val: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
-
-  const transactionsForTable = recentTransactions.map(t => ({
-      id: t.id,
-      description: t.description,
-      amount: Number(t.amount),
-      type: t.type,
-      date: t.date,
-      workspace: { name: t.workspace.name },
-      category: t.category ? { name: t.category.name } : null
-  }));
+  const userWorkspaces = await prisma.workspaceMember.findMany({ where: { userId: user.id }, include: { workspace: { include: { bankAccounts: true } } } });
+  const allUserAccounts = userWorkspaces.flatMap(wm => wm.workspace.bankAccounts.map(acc => ({...acc, balance: Number(acc.balance), workspaceName: wm.workspace.name})));
+  
+  const transactionsForTable = recentTransactions.map(t => ({ id: t.id, description: t.description, amount: Number(t.amount), type: t.type, date: t.date, workspace: { name: t.workspace.name }, category: t.category ? { name: t.category.name } : null }));
 
   return (
     <div className="space-y-8">
@@ -179,129 +104,131 @@ export default async function OrganizationPage({
             </h2>
             <p className="text-muted-foreground">Gestão centralizada da organização.</p>
         </div>
-        
         <div className="flex items-center gap-2 w-full md:w-auto">
             <DateMonthSelector />
             <OrgFilters workspaces={allWorkspaces} />
         </div>
       </div>
 
-      {/* KPI CARDS */}
+      {/* 1. KPIS (AGORA NO TOPO) */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card className="bg-card border-border shadow-sm">
-            <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Patrimônio Total</CardTitle>
+            <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
+                <div className="flex items-center gap-2">
+                    <CardTitle className="text-sm font-medium text-muted-foreground">Patrimônio</CardTitle>
+                    <InfoHelp title="Patrimônio Total">Soma de todos os saldos bancários de todos os workspaces da organização.</InfoHelp>
+                </div>
+                <div className="p-2 bg-blue-500/10 rounded-lg"><DollarSign className="w-4 h-4 text-blue-500" /></div>
             </CardHeader>
             <CardContent>
                 <div className="text-2xl font-bold text-foreground">{formatCurrency(totalBalance)}</div>
-                <p className="text-xs text-muted-foreground mt-1">Saldo global acumulado</p>
             </CardContent>
         </Card>
         
         <Card className="bg-card border-border shadow-sm">
-            <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground flex justify-between">
-                    Receita
-                    <TrendingUp className="w-4 h-4 text-emerald-500" />
-                </CardTitle>
+            <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
+                <div className="flex items-center gap-2">
+                    <CardTitle className="text-sm font-medium text-muted-foreground">Receita</CardTitle>
+                    <InfoHelp title="Receita do Período">Total de entradas efetivadas neste mês em todos os workspaces.</InfoHelp>
+                </div>
+                <div className="p-2 bg-emerald-500/10 rounded-lg"><TrendingUp className="w-4 h-4 text-emerald-500" /></div>
             </CardHeader>
             <CardContent>
                 <div className="text-2xl font-bold text-emerald-500">{formatCurrency(totalIncome)}</div>
-                <p className="text-xs text-muted-foreground mt-1">Neste período</p>
             </CardContent>
         </Card>
 
         <Card className="bg-card border-border shadow-sm">
-            <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground flex justify-between">
-                    Despesa
-                    <TrendingDown className="w-4 h-4 text-rose-500" />
-                </CardTitle>
+            <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
+                <div className="flex items-center gap-2">
+                    <CardTitle className="text-sm font-medium text-muted-foreground">Despesa</CardTitle>
+                    <InfoHelp title="Despesa do Período">Total de saídas e gastos neste mês em todos os workspaces.</InfoHelp>
+                </div>
+                <div className="p-2 bg-rose-500/10 rounded-lg"><TrendingDown className="w-4 h-4 text-rose-500" /></div>
             </CardHeader>
             <CardContent>
                 <div className="text-2xl font-bold text-rose-500">{formatCurrency(totalExpense)}</div>
-                <p className="text-xs text-muted-foreground mt-1">Neste período</p>
             </CardContent>
         </Card>
 
         <Card className="bg-card border-border shadow-sm">
-            <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground flex justify-between">
-                    Saldo do Período
-                    <PieChart className="w-4 h-4 text-blue-500" />
-                </CardTitle>
+            <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
+                <div className="flex items-center gap-2">
+                    <CardTitle className="text-sm font-medium text-muted-foreground">Saldo</CardTitle>
+                    <InfoHelp title="Fluxo Líquido">Resultado de (Receitas - Despesas) apenas dentro do período selecionado.</InfoHelp>
+                </div>
+                <div className="p-2 bg-cyan-500/10 rounded-lg"><PieChart className="w-4 h-4 text-cyan-500" /></div>
             </CardHeader>
             <CardContent>
                 <div className={`text-2xl font-bold ${totalIncome - totalExpense >= 0 ? 'text-foreground' : 'text-rose-500'}`}>
                     {formatCurrency(totalIncome - totalExpense)}
                 </div>
-                <p className="text-xs text-muted-foreground mt-1">Fluxo de caixa</p>
             </CardContent>
         </Card>
       </div>
 
-      {/* GRÁFICOS E EXTRATO */}
-      <TenantOverviewCharts workspaceData={workspaceChartData} categoryData={categoryChartData} />
+      {/* 2. INTELIGÊNCIA (SAÚDE + ORÁCULO) */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-1">
+              <HealthScore score={healthData.score} metrics={healthData.metrics} />
+          </div>
+          <div className="lg:col-span-2">
+              <FinancialOracle data={oracleData.balanceData} />
+          </div>
+      </div>
 
+      {/* 3. DETALHAMENTO (RAIO-X + FLUXO) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+           <DebtXRay data={debtData.chartData} cardNames={debtData.cardNames} />
+           <TenantOverviewCharts workspaceData={workspaceChartData} categoryData={categoryChartData} />
+      </div>
+
+      {/* 4. TABELA RECENTE */}
       <TenantRecentTransactions transactions={transactionsForTable} />
 
-      {/* METAS */}
-      <div className="space-y-4 pt-4 border-t border-border">
+      {/* 5. METAS */}
+      <div className="space-y-6 pt-4 border-t border-border">
         <div className="flex justify-between items-center">
-            <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
-                <Target className="w-5 h-5 text-purple-500" />
-                Metas Compartilhadas
-            </h3>
-            {/* MUDANÇA: Usando GoalModal com flag isShared */}
-            <GoalModal isShared={true} />
+            <div>
+                <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
+                    <Target className="w-5 h-5 text-purple-500" />
+                    Metas da Organização
+                </h3>
+                <p className="text-sm text-muted-foreground">Acompanhamento detalhado de contribuições.</p>
+            </div>
+            <GoalModal isShared={true} workspaces={allWorkspaces} />
         </div>
 
-        {sharedGoals.length === 0 ? (
+        {goalsWithDetails.length === 0 ? (
             <div className="p-8 border-2 border-dashed border-border rounded-xl flex flex-col items-center justify-center text-muted-foreground bg-muted/20">
                 <Target className="w-10 h-10 mb-3 opacity-50" />
                 <p>Nenhuma meta compartilhada.</p>
             </div>
         ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {sharedGoals.map(goal => {
-                    const target = Number(goal.targetAmount);
-                    const current = Number(goal.currentAmount);
-                    const percent = target > 0 ? Math.min((current / target) * 100, 100) : 0;
-
-                    return (
-                        <Card key={goal.id} className="bg-card border-border shadow-sm relative overflow-hidden">
-                            <div className="absolute top-0 left-0 w-1 h-full bg-purple-500" />
-                            <CardHeader className="pb-2">
-                                <CardTitle className="flex justify-between items-start">
-                                    <span>{goal.name}</span>
-                                    <span className="text-[10px] font-normal bg-purple-500/10 text-purple-500 px-2 py-0.5 rounded border border-purple-500/20 uppercase tracking-wide">
-                                        Conjunta
-                                    </span>
-                                </CardTitle>
-                                <CardDescription>Meta: {formatCurrency(target)}</CardDescription>
-                            </CardHeader>
-                            <CardContent className="space-y-4">
-                                <div className="space-y-1">
-                                    <div className="flex justify-between text-sm">
-                                        <span className="text-foreground font-bold">{formatCurrency(current)}</span>
-                                        <span className="text-muted-foreground">{percent.toFixed(0)}%</span>
-                                    </div>
-                                    <Progress value={percent} className="h-2 bg-secondary" />
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                {goalsWithDetails.map(goal => (
+                    <Card key={goal.id} className="bg-card border-border shadow-sm overflow-hidden flex flex-col">
+                        <CardHeader className="pb-2 bg-muted/20 border-b border-border/50">
+                            <div className="flex justify-between items-start">
+                                <div>
+                                    <CardTitle className="text-lg">{goal.name}</CardTitle>
+                                    <CardDescription>Meta Global: {formatCurrency(goal.targetAmount)}</CardDescription>
                                 </div>
-                                
-                                <div className="flex gap-2 pt-2">
-                                    <div className="flex-1">
-                                        <DepositGoalModal 
-                                            goal={{ ...goal, targetAmount: Number(goal.targetAmount), currentAmount: Number(goal.currentAmount) }} 
-                                            accounts={allUserAccounts} 
-                                            type="DEPOSIT" 
-                                        />
-                                    </div>
+                                <div className="flex gap-2">
+                                    <GoalModal goal={goal} isShared={true} workspaces={allWorkspaces} />
+                                    <DepositGoalModal 
+                                        goal={goal} 
+                                        accounts={allUserAccounts} 
+                                        type="DEPOSIT" 
+                                    />
                                 </div>
-                            </CardContent>
-                        </Card>
-                    )
-                })}
+                            </div>
+                        </CardHeader>
+                        <CardContent className="p-6 flex-1">
+                            <GoalAnalytics goal={goal} workspaces={allWorkspaces} />
+                        </CardContent>
+                    </Card>
+                ))}
             </div>
         )}
       </div>

@@ -204,7 +204,15 @@ model Transaction {
   date          DateTime
   type          TransactionType
   isPaid        Boolean         @default(false)
-  isRecurring   Boolean         @default(false)
+  
+  isRecurring   Boolean         @default(false) // É uma assinatura/conta fixa?
+  frequency     TransactionFrequency @default(NONE) // Mensal, Semanal...
+  
+  isInstallment Boolean         @default(false) // É parcelado?
+  installmentId String?         // ID único para agrupar as parcelas da mesma compra
+  installmentCurrent Int?       // Parcela atual (1)
+  installmentTotal   Int?       // Total de parcelas (10)
+  nextRecurringDate DateTime?
   
   workspaceId   String
   workspace     Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -229,6 +237,14 @@ model Transaction {
   @@index([categoryId])
   @@index([creditCardId])
   @@index([goalId])
+  @@index([installmentId]) // Importante para buscar todas as parcelas de uma compra
+}
+
+enum TransactionFrequency {
+  NONE
+  WEEKLY
+  MONTHLY
+  YEARLY
 }
 
 model Budget {
@@ -282,6 +298,10 @@ model Goal {
   targetAmount  Decimal   
   currentAmount Decimal   @default(0) 
   deadline      DateTime?
+  
+  // Regras de Divisão (JSON): { "workspace_id": 60, "workspace_id_2": 40 }
+  contributionRules Json?
+  
   workspaceId   String?
   workspace     Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   

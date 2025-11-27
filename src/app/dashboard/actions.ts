@@ -1,6 +1,5 @@
 'use server';
 
-// Imports diretos de cada arquivo (sem export * para evitar confusão do Next.js com server actions)
 import {
   switchWorkspace as _switchWorkspace,
   createWorkspace as _createWorkspace,
@@ -37,8 +36,13 @@ import {
   checkDeadlinesAndSendAlerts as _checkDeadlinesAndSendAlerts
 } from './actions/planning';
 
+import {
+    upsertCategory as _upsertCategory,
+    deleteCategory as _deleteCategory
+} from './actions/categories';
+
 // =================================================
-// EXPORTS UNIFICADOS (Com nomes originais)
+// EXPORTS UNIFICADOS
 // =================================================
 
 // Workspaces
@@ -63,36 +67,20 @@ export const upsertTransaction = _upsertTransaction;
 export const deleteTransaction = _deleteTransaction;
 export const importTransactions = _importTransactions;
 
+// Categories
+export const upsertCategory = _upsertCategory;
+export const deleteCategory = _deleteCategory;
+
 // Planning & System
 export const upsertBudget = _upsertBudget;
 export const deleteBudget = _deleteBudget;
 export const upsertGoal = _upsertGoal;
 export const deleteGoal = _deleteGoal;
+// Helper para movimentação de meta (add/withdraw)
+export const addMoneyToGoal = async (id: string, amount: number, accId: string) => _moveMoneyGoal(id, amount, accId, 'DEPOSIT');
+export const withdrawMoneyFromGoal = async (id: string, amount: number, accId: string) => _moveMoneyGoal(id, amount, accId, 'WITHDRAW');
+
 export const getNotifications = _getNotifications;
 export const markNotificationAsRead = _markNotificationAsRead;
 export const markAllNotificationsAsRead = _markAllNotificationsAsRead;
 export const checkDeadlinesAndSendAlerts = _checkDeadlinesAndSendAlerts;
-
-// =================================================
-// ALIASES PARA COMPATIBILIDADE (Backwards Compatibility)
-// =================================================
-
-export const createAccount = async (data: FormData) => _upsertAccount(data);
-export const updateAccount = async (id: string, data: FormData) => _upsertAccount(data, id);
-
-export const createCreditCard = async (data: FormData) => _upsertCard(data);
-export const updateCreditCard = async (id: string, data: FormData) => _upsertCard(data, id);
-export const payInvoice = async (data: FormData) => _payCreditCardInvoice(data);
-
-export const createTransaction = async (data: FormData) => _upsertTransaction(data);
-export const updateTransaction = async (id: string, data: FormData) => _upsertTransaction(data, id);
-
-export const createBudget = async (data: FormData) => _upsertBudget(data);
-export const updateBudget = async (id: string, data: FormData) => _upsertBudget(data, id);
-
-export const createGoal = async (data: FormData) => _upsertGoal(data);
-export const updateGoal = async (id: string, data: FormData) => _upsertGoal(data, id);
-export const createSharedGoal = async (data: FormData) => _upsertGoal(data, undefined, true);
-
-export const addMoneyToGoal = async (id: string, amount: number, accId: string) => _moveMoneyGoal(id, amount, accId, 'DEPOSIT');
-export const withdrawMoneyFromGoal = async (id: string, amount: number, accId: string) => _moveMoneyGoal(id, amount, accId, 'WITHDRAW');

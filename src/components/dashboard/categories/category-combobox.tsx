@@ -9,9 +9,10 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import * as Icons from "lucide-react";
+import { getIcon } from "@/lib/icons"; // <--- Import centralizado
 import { upsertCategory } from "@/app/dashboard/actions/categories";
 import { toast } from "sonner";
+import { Loader2 } from "lucide-react"; // Import explícito do Loader2 para uso direto
 
 interface Category {
   id: string;
@@ -32,7 +33,6 @@ export function CategoryCombobox({ categories, type, defaultValue = "" }: Props)
   const [search, setSearch] = React.useState("");
   const [isCreating, setIsCreating] = React.useState(false);
 
-  // Filtragem manual simples (Resolve o problema de não encontrar)
   const filteredCategories = categories.filter((category) =>
     category.name.toLowerCase().includes(search.toLowerCase())
   );
@@ -50,7 +50,7 @@ export function CategoryCombobox({ categories, type, defaultValue = "" }: Props)
     const result = await upsertCategory(formData);
     setIsCreating(false);
 
-    if (result?.error) {
+    if (result.error) {
         toast.error(result.error);
     } else {
         toast.success("Categoria criada!");
@@ -61,14 +61,12 @@ export function CategoryCombobox({ categories, type, defaultValue = "" }: Props)
   };
 
   const handleSelect = (categoryName: string) => {
-      // Define o valor e fecha o popover
       setValue(categoryName === value ? "" : categoryName);
       setOpen(false);
   };
 
   return (
     <>
-    {/* Input hidden para enviar o dado no formulário */}
     <input type="hidden" name="category" value={value} />
     
     <Popover open={open} onOpenChange={setOpen} modal={true}>
@@ -82,11 +80,9 @@ export function CategoryCombobox({ categories, type, defaultValue = "" }: Props)
           {value ? (
              <div className="flex items-center gap-2">
                 {(() => {
-                   // Busca insensível a maiúsculas/minúsculas para exibir corretamente
                    const cat = categories.find((c) => c.name.toLowerCase() === value.toLowerCase());
                    if (cat) {
-                      // @ts-ignore
-                      const Icon = Icons[cat.icon] || Icons.Tag;
+                      const Icon = getIcon(cat.icon); // <--- Uso Seguro
                       return (
                           <>
                             <div className="w-5 h-5 rounded flex items-center justify-center" style={{ backgroundColor: (cat.color || '#94a3b8') + '20' }}>
@@ -106,13 +102,10 @@ export function CategoryCombobox({ categories, type, defaultValue = "" }: Props)
         </Button>
       </PopoverTrigger>
       
-      {/* z-[9999] garante que fique acima de qualquer modal */}
       <PopoverContent 
         className="w-[--radix-popover-trigger-width] p-0 bg-popover text-popover-foreground shadow-xl border border-border rounded-lg overflow-hidden z-[9999]" 
         align="start"
       >
-        
-        {/* Campo de Busca Customizado (Nativo, sem biblioteca de Command) */}
         <div className="flex items-center border-b border-border px-3 bg-muted/20">
           <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
           <input
@@ -130,10 +123,7 @@ export function CategoryCombobox({ categories, type, defaultValue = "" }: Props)
           )}
         </div>
 
-        {/* Lista de Itens Customizada */}
         <div className="max-h-[240px] overflow-y-auto p-1 scrollbar-thin">
-            
-            {/* Estado Vazio / Criar */}
             {filteredCategories.length === 0 && (
                 <div className="py-4 text-center text-sm">
                     {search.trim() !== "" ? (
@@ -145,9 +135,9 @@ export function CategoryCombobox({ categories, type, defaultValue = "" }: Props)
                                 className="w-full h-8 gap-2 text-xs" 
                                 onClick={handleCreate}
                                 disabled={isCreating}
-                                type="button" // Importante para não submeter o form principal
+                                type="button"
                             >
-                                {isCreating ? <Icons.Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                                {isCreating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
                                 Criar "{search}"
                             </Button>
                         </div>
@@ -157,15 +147,13 @@ export function CategoryCombobox({ categories, type, defaultValue = "" }: Props)
                 </div>
             )}
 
-            {/* Lista de Categorias */}
             {filteredCategories.length > 0 && (
                 <>
                     <div className="px-2 py-1.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
                         Sugestões
                     </div>
                     {filteredCategories.map((category) => {
-                        // @ts-ignore
-                        const Icon = Icons[category.icon] || Icons.Tag;
+                        const Icon = getIcon(category.icon); // <--- Uso Seguro
                         const isSelected = value.toLowerCase() === category.name.toLowerCase();
                         
                         return (

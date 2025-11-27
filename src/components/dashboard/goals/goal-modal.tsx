@@ -1,23 +1,50 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Target, Loader2, Plus, Pencil, Users } from "lucide-react";
-import { createGoal, createSharedGoal, updateGoal } from '@/app/dashboard/actions'; // Importamos os aliases do actions.ts
+import { Target, Loader2, Plus, Pencil, Users, PieChart } from "lucide-react";
+import { upsertGoal } from '@/app/dashboard/actions';
 import { toast } from "sonner";
+import { Progress } from '@/components/ui/progress';
 
 interface GoalModalProps {
-  goal?: any;           // Se existir, é Edição
-  isShared?: boolean;   // Se true e for criação, cria meta compartilhada
+  goal?: any;
+  isShared?: boolean;
+  workspaces?: { id: string; name: string }[]; // <--- Recebe lista de workspaces para definir regras
 }
 
-export function GoalModal({ goal, isShared = false }: GoalModalProps) {
+export function GoalModal({ goal, isShared = false, workspaces = [] }: GoalModalProps) {
   const [open, setOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  
+  // Estado para regras de contribuição: { "workspaceId": 60, ... }
+  const [rules, setRules] = useState<Record<string, number>>({});
+
   const isEditing = !!goal;
+
+  // Inicializa as regras se estiver editando ou abrindo
+  useEffect(() => {
+      if (goal?.contributionRules) {
+          setRules(goal.contributionRules as Record<string, number>);
+      } else if (isShared && workspaces.length > 0) {
+          // Se for nova meta compartilhada, tenta dividir igualmente por padrão
+          const equalShare = Math.floor(100 / workspaces.length);
+          const initialRules: Record<string, number> = {};
+          workspaces.forEach(ws => initialRules[ws.id] = equalShare);
+          setRules(initialRules);
+      }
+  }, [goal, isShared, workspaces, open]);
+
+  const handleRuleChange = (wsId: string, val: string) => {
+      const num = Math.min(100, Math.max(0, Number(val)));
+      setRules(prev => ({ ...prev, [wsId]: num }));
+  };
+
+  // Calcula total para validar se fecha 100% (opcional, mas bom para UX)
+  const totalPercentage = Object.values(rules).reduce((a, b) => a + b, 0);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -25,15 +52,20 @@ export function GoalModal({ goal, isShared = false }: GoalModalProps) {
 
     const formData = new FormData(event.currentTarget);
     
+    // Adiciona as regras como JSON string se for compartilhada
+    if (isShared) {
+        formData.append('contributionRules', JSON.stringify(rules));
+    }
+    
     try {
         if (isEditing) {
-            await updateGoal(goal.id, formData);
+            await upsertGoal(formData, goal.id);
             toast.success("Meta atualizada!");
         } else if (isShared) {
-            await createSharedGoal(formData);
+            await upsertGoal(formData, undefined, true);
             toast.success("Meta compartilhada criada!");
         } else {
-            await createGoal(formData);
+            await upsertGoal(formData);
             toast.success("Meta criada!");
         }
         setOpen(false);
@@ -60,7 +92,7 @@ export function GoalModal({ goal, isShared = false }: GoalModalProps) {
         )}
       </DialogTrigger>
       
-      <DialogContent className="bg-card border-border text-card-foreground sm:max-w-[425px]">
+      <DialogContent className="bg-card border-border text-card-foreground sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-foreground flex items-center gap-2">
             {isShared ? <Users className="w-5 h-5 text-purple-500" /> : <Target className="w-5 h-5 text-emerald-500" />}
@@ -70,12 +102,6 @@ export function GoalModal({ goal, isShared = false }: GoalModalProps) {
         
         <form onSubmit={handleSubmit} className="grid gap-4 py-4">
           
-          {isShared && !isEditing && (
-            <div className="bg-purple-500/10 border border-purple-500/20 p-3 rounded text-xs text-purple-400 mb-2">
-                Esta meta será visível para todos os membros e qualquer um poderá contribuir.
-            </div>
-          )}
-
           <div className="grid gap-2">
             <Label htmlFor="name">Nome do Objetivo</Label>
             <Input 
@@ -116,18 +142,54 @@ export function GoalModal({ goal, isShared = false }: GoalModalProps) {
                     />
                 </div>
             )}
+             <div className="grid gap-2">
+                <Label htmlFor="deadline">Prazo (Opcional)</Label>
+                <Input 
+                    id="deadline" 
+                    name="deadline" 
+                    type="date" 
+                    defaultValue={formattedDeadline}
+                    className="bg-muted border-border text-foreground" 
+                />
+            </div>
           </div>
 
-          <div className="grid gap-2">
-            <Label htmlFor="deadline">Prazo (Opcional)</Label>
-            <Input 
-                id="deadline" 
-                name="deadline" 
-                type="date" 
-                defaultValue={formattedDeadline}
-                className="bg-muted border-border text-foreground" 
-            />
-          </div>
+          {/* SEÇÃO DE DIVISÃO DE CONTRIBUIÇÃO (Só para Shared) */}
+          {isShared && workspaces.length > 0 && (
+              <div className="border-t border-border pt-4 mt-2">
+                  <div className="flex items-center justify-between mb-3">
+                      <Label className="text-purple-400 flex items-center gap-2">
+                          <PieChart className="w-4 h-4" /> Divisão de Responsabilidade
+                      </Label>
+                      <span className={`text-xs font-bold ${totalPercentage !== 100 ? 'text-rose-500' : 'text-emerald-500'}`}>
+                          Total: {totalPercentage}%
+                      </span>
+                  </div>
+                  
+                  <div className="space-y-3 bg-muted/30 p-3 rounded-lg border border-border">
+                      {workspaces.map(ws => (
+                          <div key={ws.id} className="space-y-1">
+                              <div className="flex justify-between text-xs">
+                                  <span>{ws.name}</span>
+                                  <span className="font-mono">{rules[ws.id] || 0}%</span>
+                              </div>
+                              <input 
+                                  type="range" 
+                                  min="0" 
+                                  max="100" 
+                                  step="5"
+                                  value={rules[ws.id] || 0}
+                                  onChange={(e) => handleRuleChange(ws.id, e.target.value)}
+                                  className="w-full h-1.5 bg-muted rounded-lg appearance-none cursor-pointer accent-purple-500"
+                              />
+                          </div>
+                      ))}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-2">
+                      Define quanto cada Workspace "deveria" contribuir. Isso ajuda a medir quem está adiantado ou atrasado.
+                  </p>
+              </div>
+          )}
 
           <Button type="submit" disabled={isLoading} className={`w-full text-white mt-2 ${isShared ? 'bg-purple-600 hover:bg-purple-500' : 'bg-emerald-600 hover:bg-emerald-500'}`}>
             {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : (isEditing ? 'Salvar Alterações' : 'Criar Meta')}

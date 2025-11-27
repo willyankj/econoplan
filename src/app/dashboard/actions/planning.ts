@@ -53,10 +53,20 @@ export async function upsertGoal(formData: FormData, id?: string, isShared = fal
   const rawTarget = formData.get("targetAmount") as string;
   const targetAmount = rawTarget ? parseFloat(rawTarget) : 0;
 
+  // Captura as regras de contribuição (Se vierem como JSON string do form)
+  const rulesString = formData.get("contributionRules") as string;
+  let contributionRules = null;
+  if (rulesString) {
+      try {
+          contributionRules = JSON.parse(rulesString);
+      } catch (e) { console.log("Erro ao parsear regras", e) }
+  }
+
   const data = {
     name: formData.get("name") as string,
     targetAmount: isNaN(targetAmount) ? 0 : targetAmount,
-    deadline: formData.get("deadline") ? new Date(formData.get("deadline") as string) : null
+    deadline: formData.get("deadline") ? new Date(formData.get("deadline") as string) : null,
+    contributionRules: contributionRules ?? undefined // Adicionado
   };
 
   if (id) {

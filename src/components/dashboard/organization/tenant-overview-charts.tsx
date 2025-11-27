@@ -1,11 +1,10 @@
 'use client';
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { InfoHelp } from "@/components/dashboard/info-help"; // Importar
 
 const currency = (val: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
-
-// Paleta de cores mais harmoniosa
 const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899', '#6366f1'];
 
 interface TenantChartsProps {
@@ -15,8 +14,6 @@ interface TenantChartsProps {
 
 export function TenantOverviewCharts({ workspaceData, categoryData }: TenantChartsProps) {
   const sortedWorkspaces = [...workspaceData].sort((a, b) => b.expense - a.expense);
-  
-  // Top 5 Categorias
   const topCategories = [...categoryData].sort((a, b) => b.value - a.value).slice(0, 5);
   const maxCategoryValue = topCategories[0]?.value || 1;
 
@@ -38,24 +35,21 @@ export function TenantOverviewCharts({ workspaceData, categoryData }: TenantChar
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      {/* GRÁFICO 1: WORKSPACES */}
       <Card className="bg-card border-border shadow-sm">
-        <CardHeader>
-          <CardTitle className="text-lg text-foreground">Fluxo por Workspace</CardTitle>
+        <CardHeader className="flex flex-row items-center justify-between pb-2">
+          <div className="flex items-center gap-2">
+             <CardTitle className="text-lg text-foreground">Fluxo por Workspace</CardTitle>
+             <InfoHelp title="Comparativo entre Áreas">
+                Mostra quanto cada workspace (Pessoal, Empresa, Família) recebeu e gastou. Ajuda a entender quem é o maior responsável pelos custos.
+             </InfoHelp>
+          </div>
         </CardHeader>
         <CardContent className="h-[300px]">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={sortedWorkspaces} layout="vertical" margin={{ left: 0, right: 30 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false} />
               <XAxis type="number" hide />
-              <YAxis 
-                dataKey="name" 
-                type="category" 
-                width={100} 
-                tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }} 
-                tickLine={false}
-                axisLine={false}
-              />
+              <YAxis dataKey="name" type="category" width={100} tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }} tickLine={false} axisLine={false} />
               <Tooltip content={<CustomTooltip />} cursor={{ fill: 'hsl(var(--muted)/0.2)' }} />
               <Bar dataKey="expense" name="Despesas" fill="#f43f5e" radius={[0, 4, 4, 0]} barSize={20} />
               <Bar dataKey="income" name="Receitas" fill="#10b981" radius={[0, 4, 4, 0]} barSize={20} />
@@ -64,19 +58,22 @@ export function TenantOverviewCharts({ workspaceData, categoryData }: TenantChar
         </CardContent>
       </Card>
 
-      {/* GRÁFICO 2: CATEGORIAS (COM CORES) */}
       <Card className="bg-card border-border shadow-sm">
-        <CardHeader>
-          <CardTitle className="text-lg text-foreground">Top 5 Categorias de Gastos</CardTitle>
+        <CardHeader className="flex flex-row items-center justify-between pb-2">
+          <div className="flex items-center gap-2">
+              <CardTitle className="text-lg text-foreground">Top 5 Categorias</CardTitle>
+              <InfoHelp title="Onde o dinheiro vai?">
+                  Ranking das categorias onde você mais gastou em toda a organização.
+              </InfoHelp>
+          </div>
         </CardHeader>
-        <CardContent className="space-y-5">
+        <CardContent className="space-y-5 pt-4">
             {topCategories.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-10">Sem dados de despesas neste período.</p>
+                <p className="text-sm text-muted-foreground text-center py-10">Sem dados de despesas.</p>
             ) : (
                 topCategories.map((cat, idx) => {
                     const percent = (cat.value / maxCategoryValue) * 100;
-                    const color = COLORS[idx % COLORS.length]; // Pega cor cíclica
-
+                    const color = COLORS[idx % COLORS.length];
                     return (
                         <div key={idx} className="space-y-1">
                             <div className="flex justify-between text-sm">
@@ -87,10 +84,7 @@ export function TenantOverviewCharts({ workspaceData, categoryData }: TenantChar
                                 <span className="text-muted-foreground">{currency(cat.value)}</span>
                             </div>
                             <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
-                                <div 
-                                    className="h-full rounded-full transition-all duration-500" 
-                                    style={{ width: `${percent}%`, backgroundColor: color }} 
-                                />
+                                <div className="h-full rounded-full transition-all duration-500" style={{ width: `${percent}%`, backgroundColor: color }} />
                             </div>
                         </div>
                     )
