@@ -394,27 +394,44 @@ export async function importTransactions(accountId: string, transactions: any[])
         await prisma.$transaction(async (tx) => {
             for (const t of transactions) {
                 const date = new Date(t.date);
-                const categoryName = t.category || "Importados";
                 const transactionType = t.amount >= 0 ? 'INCOME' : 'EXPENSE';
+                
+                let finalCategoryId = t.categoryId; // Tenta usar o ID que veio do front
 
-                const cat = await tx.category.upsert({
-                    where: { 
-                      workspaceId_name_type: { 
-                        workspaceId: account.workspaceId, 
-                        name: categoryName,
-                        type: transactionType
-                      } 
-                    },
-                    update: {}, 
-                    create: { 
-                      name: categoryName, 
-                      type: transactionType, 
-                      workspaceId: account.workspaceId 
-                    }
-                });
+                // Se não tem ID (o usuário deixou sem nada ou veio automático sem match), 
+                // usa a lógica de criar/buscar pelo nome
+                if (!finalCategoryId) {
+                    const categoryName = t.categoryName || "Importados"; // Nome da categoria ou fallback
+                    
+                    const cat = await tx.category.upsert({
+                        where: { 
+                          workspaceId_name_type: { 
+                            workspaceId: account.workspaceId, 
+                            name: categoryName,
+                            type: transactionType
+                          } 
+                        },
+                        update: {}, 
+                        create: { 
+                          name: categoryName, 
+                          type: transactionType, 
+                          workspaceId: account.workspaceId 
+                        }
+                    });
+                    finalCategoryId = cat.id;
+                }
 
                 await tx.transaction.create({
-                    data: { description: t.description, amount: Math.abs(t.amount), type: transactionType, date, workspaceId: account.workspaceId, bankAccountId: accountId, categoryId: cat.id, isPaid: true }
+                    data: { 
+                        description: t.description, 
+                        amount: Math.abs(t.amount), 
+                        type: transactionType, 
+                        date, 
+                        workspaceId: account.workspaceId, 
+                        bankAccountId: accountId, 
+                        categoryId: finalCategoryId,
+                        isPaid: true 
+                    }
                 });
 
                 const op = transactionType === 'INCOME' ? 'increment' : 'decrement';
@@ -427,10 +444,71 @@ export async function importTransactions(accountId: string, transactions: any[])
             await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'CREATE', entity: 'Transaction', details: `Importou ${count} transações` });
         }
 
-    } catch(e) { return { error: "Erro na importação" }; }
+    } catch(e) { 
+        console.error(e);
+        return { error: "Erro na importação" }; 
+    }
 
     revalidatePath('/dashboard/transactions'); 
     revalidatePath('/dashboard/accounts');
     revalidatePath('/dashboard/settings');
     return { success: true };
+}
+
+export async function stopTransactionRecurrence(id: string) {
+  const { user, error } = await validateUser('transactions_edit');
+  if (error || !user) return { error };
+
+  try {
+    await prisma.transaction.update({
+      where: { id },
+      data: { 
+        isRecurring: false, 
+        nextRecurringDate: null // Remove a data da próxima, matando o ciclo do script
+      }
+    });
+
+    await createAuditLog({ 
+        tenantId: user.tenantId, 
+        userId: user.id, 
+        action: 'UPDATE', 
+        entity: 'Transaction', 
+        entityId: id, 
+        details: 'Encerrou recorrência de despesa fixa' 
+    });
+
+  } catch (e) {
+    return { error: "Erro ao cancelar recorrência." };
+  }
+
+  revalidatePath('/dashboard');
+  return { success: true };
+}
+
+export async function getRecurringTransactions() {
+  const { user, error } = await validateUser();
+  if (error || !user) return [];
+
+  const workspaceId = await getActiveWorkspaceId(user);
+  if (!workspaceId) return [];
+
+  const recurrings = await prisma.transaction.findMany({
+    where: {
+      workspaceId,
+      isRecurring: true,
+      nextRecurringDate: { not: null } // Apenas as que estão ativas (com data futura)
+    },
+    orderBy: { nextRecurringDate: 'asc' },
+    include: { category: true }
+  });
+
+  // Serializa datas e decimais para evitar warnings do React
+  return recurrings.map(t => ({
+      ...t,
+      amount: Number(t.amount),
+      date: t.date.toISOString(),
+      nextRecurringDate: t.nextRecurringDate?.toISOString(),
+      createdAt: t.createdAt.toISOString(),
+      updatedAt: t.updatedAt.toISOString()
+  }));
 }

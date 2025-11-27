@@ -1,7 +1,6 @@
 'use client';
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
+import { Card, CardContent } from "@/components/ui/card";
 import { Target, Trophy, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 
@@ -22,46 +21,50 @@ export function GoalAnalytics({ goal, workspaces }: Props) {
   const contributions: Record<string, number> = {};
   
   goal.transactions.forEach(t => {
-      // Consideramos apenas depósitos (EXPENSE em relação à conta, entrada na meta)
       if (t.type === 'EXPENSE') {
           contributions[t.workspaceId] = (contributions[t.workspaceId] || 0) + Number(t.amount);
       }
-      // Opcional: Subtrair saques (INCOME) se quiser saldo líquido
   });
 
-  // 2. Preparar dados para renderização
-  const analyticsData = workspaces.map(ws => {
-      const paid = contributions[ws.id] || 0;
-      const targetPercent = goal.contributionRules?.[ws.id] || 0;
-      
-      // Quanto essa pessoa deveria ter pago DO TOTAL DA META
-      const targetValue = (goal.targetAmount * targetPercent) / 100;
-      
-      // Progresso individual em relação à SUA parte
-      const personalProgress = targetValue > 0 ? (paid / targetValue) * 100 : 0;
-      
-      // Progresso em relação ao todo
-      const totalShare = goal.targetAmount > 0 ? (paid / goal.targetAmount) * 100 : 0;
+  // 2. Preparar dados (Filtrando apenas quem participa ou pagou)
+  const analyticsData = workspaces
+    .map(ws => {
+        const paid = contributions[ws.id] || 0;
+        const targetPercent = goal.contributionRules?.[ws.id] || 0;
+        
+        // Se não tem regra definida E não pagou nada, ignoramos esse workspace na análise
+        if (!targetPercent && paid === 0) return null;
 
-      return {
-          id: ws.id,
-          name: ws.name,
-          paid,
-          targetPercent,
-          targetValue,
-          personalProgress,
-          totalShare
-      };
-  }).sort((a, b) => b.paid - a.paid); // Ordenar por quem pagou mais (Ranking)
+        const targetValue = (goal.targetAmount * targetPercent) / 100;
+        
+        // Progresso individual em relação à SUA parte
+        // Se não tem targetValue (ex: 0%), mas pagou, o progresso é infinito (100%+)
+        const personalProgress = targetValue > 0 ? (paid / targetValue) * 100 : (paid > 0 ? 100 : 0);
+        
+        const totalShare = goal.targetAmount > 0 ? (paid / goal.targetAmount) * 100 : 0;
 
-  const topContributor = analyticsData[0]?.paid > 0 ? analyticsData[0] : null;
+        return {
+            id: ws.id,
+            name: ws.name,
+            paid,
+            targetPercent,
+            targetValue,
+            personalProgress,
+            totalShare
+        };
+    })
+    .filter(item => item !== null) // Remove os nulos
+    .sort((a, b) => (b!.paid - a!.paid)); // Ordena pelo maior pagador
+
+  // @ts-ignore (TypeScript reclama do filter null, mas garantimos acima)
+  const topContributor = analyticsData.length > 0 && analyticsData[0].paid > 0 ? analyticsData[0] : null;
 
   return (
     <div className="space-y-6">
         {/* KPI Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {topContributor && (
-                <Card className="bg-gradient-to-br from-yellow-500/10 to-transparent border-yellow-500/20">
+            {topContributor ? (
+                <Card className="bg-gradient-to-br from-yellow-500/10 to-transparent border-yellow-500/20 shadow-sm">
                     <CardContent className="p-4 flex items-center gap-4">
                         <div className="p-3 bg-yellow-500/20 rounded-full text-yellow-500">
                             <Trophy className="w-6 h-6" />
@@ -73,9 +76,16 @@ export function GoalAnalytics({ goal, workspaces }: Props) {
                         </div>
                     </CardContent>
                 </Card>
+            ) : (
+                // Placeholder se ninguém pagou ainda
+                <Card className="bg-muted/20 border-dashed border-border shadow-none">
+                    <CardContent className="p-4 flex items-center justify-center text-muted-foreground text-sm italic">
+                        Nenhuma contribuição ainda.
+                    </CardContent>
+                </Card>
             )}
             
-            <Card className="bg-card border-border">
+            <Card className="bg-card border-border shadow-sm">
                 <CardContent className="p-4 flex items-center gap-4">
                     <div className="p-3 bg-purple-500/10 rounded-full text-purple-500">
                         <Target className="w-6 h-6" />
@@ -86,55 +96,70 @@ export function GoalAnalytics({ goal, workspaces }: Props) {
                             {formatCurrency(Math.max(0, goal.targetAmount - goal.currentAmount))}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                            {( (goal.currentAmount / goal.targetAmount) * 100 ).toFixed(1)}% Concluído
+                            {( (goal.currentAmount / (goal.targetAmount || 1)) * 100 ).toFixed(1)}% Concluído
                         </p>
                     </div>
                 </CardContent>
             </Card>
         </div>
 
-        {/* Detalhamento por Workspace */}
+        {/* Detalhamento por Workspace (Apenas participantes) */}
         <div className="space-y-4">
-            <h4 className="text-sm font-medium text-foreground">Detalhamento de Contribuições</h4>
+            <h4 className="text-sm font-medium text-foreground flex items-center justify-between">
+                <span>Participantes</span>
+                <span className="text-xs text-muted-foreground font-normal">{analyticsData.length} workspace(s)</span>
+            </h4>
+            
+            {/* @ts-ignore */}
             {analyticsData.map(data => {
-                const isBehind = data.targetPercent > 0 && data.personalProgress < ((goal.currentAmount / goal.targetAmount) * 100); 
-                // Lógica simples: Se meu progresso pessoal está menor que o progresso da meta geral, estou atrasando o time.
+                const isBehind = data.targetPercent > 0 && data.personalProgress < ((goal.currentAmount / (goal.targetAmount || 1)) * 100); 
 
                 return (
-                    <div key={data.id} className="bg-muted/30 p-3 rounded-lg border border-border">
+                    <div key={data.id} className="bg-muted/30 p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors">
                         <div className="flex justify-between items-center mb-2">
                             <div className="flex items-center gap-2">
                                 <span className="font-medium text-sm text-foreground">{data.name}</span>
-                                {data.targetPercent > 0 && (
+                                {data.targetPercent > 0 ? (
+                                    <span className="text-[10px] px-1.5 py-0.5 bg-purple-500/10 text-purple-500 border border-purple-500/20 rounded">
+                                        Resp: {data.targetPercent}%
+                                    </span>
+                                ) : (
                                     <span className="text-[10px] px-1.5 py-0.5 bg-muted border border-border rounded text-muted-foreground">
-                                        Meta: {data.targetPercent}% ({formatCurrency(data.targetValue)})
+                                        Voluntário
                                     </span>
                                 )}
                             </div>
-                            <span className="font-bold text-sm">{formatCurrency(data.paid)}</span>
+                            <div className="text-right">
+                                <span className="font-bold text-sm block">{formatCurrency(data.paid)}</span>
+                                {data.targetValue > 0 && (
+                                    <span className="text-[10px] text-muted-foreground">
+                                        de {formatCurrency(data.targetValue)}
+                                    </span>
+                                )}
+                            </div>
                         </div>
 
-                        {/* Barra de Progresso (Meta Individual) */}
-                        <div className="relative h-2 bg-secondary rounded-full overflow-hidden mb-1">
+                        {/* Barra de Progresso Individual */}
+                        <div className="relative h-2 bg-secondary rounded-full overflow-hidden mb-1.5">
                             <div 
-                                className={`h-full rounded-full transition-all ${data.personalProgress >= 100 ? 'bg-emerald-500' : 'bg-blue-500'}`}
+                                className={`h-full rounded-full transition-all ${data.personalProgress >= 100 ? 'bg-emerald-500' : 'bg-purple-500'}`}
                                 style={{ width: `${Math.min(data.personalProgress, 100)}%` }}
                             />
                         </div>
                         
                         <div className="flex justify-between items-center text-xs">
                             <span className="text-muted-foreground">
-                                {data.personalProgress.toFixed(0)}% da sua parte
+                                {data.personalProgress.toFixed(0)}% da parte dele(a)
                             </span>
                             
                             {data.targetPercent > 0 && (
                                 data.personalProgress >= 100 ? (
                                     <span className="text-emerald-500 flex items-center gap-1 font-medium">
-                                        <CheckCircle2 className="w-3 h-3" /> Cumpriu a meta
+                                        <CheckCircle2 className="w-3 h-3" /> Concluído
                                     </span>
                                 ) : isBehind ? (
                                     <span className="text-amber-500 flex items-center gap-1">
-                                        <AlertTriangle className="w-3 h-3" /> Abaixo do esperado
+                                        <AlertTriangle className="w-3 h-3" /> Atrasado
                                     </span>
                                 ) : (
                                     <span className="text-blue-500">Em andamento</span>

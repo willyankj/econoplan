@@ -2,7 +2,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"; // <--- Adicionado CardDescription
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"; // Incluído CardDescription
 import { Building2, TrendingUp, TrendingDown, Target, PieChart, DollarSign } from "lucide-react";
 import { GoalModal } from "@/components/dashboard/goals/goal-modal";
 import { DepositGoalModal } from "@/components/dashboard/goals/deposit-goal-modal";
@@ -46,24 +46,47 @@ export default async function OrganizationPage({
       startDate = new Date(d.getFullYear(), d.getMonth(), 1); endDate = new Date(d.getFullYear(), d.getMonth()+1, 0, 23,59,59);
   }
 
-  const filterWorkspaceId = params.filterWorkspace !== 'ALL' ? params.filterWorkspace : undefined;
-  const filterType = params.filterType !== 'ALL' ? params.filterType : undefined;
+  // Identifica o ID do Workspace filtrado (ou undefined se for 'ALL')
+  const filterWorkspaceId = params.filterWorkspace && params.filterWorkspace !== 'ALL' ? params.filterWorkspace : undefined;
+  const filterType = params.filterType && params.filterType !== 'ALL' ? params.filterType : undefined;
 
-  // BUSCAS DE DADOS
-  const oracleData = await getTenantOracleData();
-  const debtData = await getTenantDebtXRayData();
-  const healthData = await getTenantHealthScore();
+  // --- CORREÇÃO AQUI: Passando o filtro para as funções ---
+  const oracleData = await getTenantOracleData(6, filterWorkspaceId);
+  const debtData = await getTenantDebtXRayData(filterWorkspaceId);
+  const healthData = await getTenantHealthScore(filterWorkspaceId);
+  // --------------------------------------------------------
 
   const workspaces = await prisma.workspace.findMany({
-    where: { tenantId, ...(filterWorkspaceId && { id: filterWorkspaceId }) },
-    include: { bankAccounts: true, transactions: { where: { date: { gte: startDate, lte: endDate }, ...(filterType && { type: filterType as any }) }, include: { category: true } } }
+    where: { 
+        tenantId, 
+        ...(filterWorkspaceId && { id: filterWorkspaceId }) // Filtro aplicado na busca de workspaces
+    },
+    include: { 
+        bankAccounts: true, 
+        transactions: { 
+            where: { 
+                date: { gte: startDate, lte: endDate }, 
+                ...(filterType && { type: filterType as any }) 
+            }, 
+            include: { category: true } 
+        } 
+    }
   });
 
   const allWorkspaces = await prisma.workspace.findMany({ where: { tenantId }, select: { id: true, name: true } });
 
   const recentTransactions = await prisma.transaction.findMany({
-    where: { workspace: { tenantId, ...(filterWorkspaceId && { id: filterWorkspaceId }) }, date: { gte: startDate, lte: endDate }, ...(filterType && { type: filterType as any }) },
-    orderBy: { date: 'desc' }, take: 20, include: { workspace: true, category: true }
+    where: { 
+        workspace: { 
+            tenantId, 
+            ...(filterWorkspaceId && { id: filterWorkspaceId }) // Filtro aplicado nas transações recentes
+        }, 
+        date: { gte: startDate, lte: endDate }, 
+        ...(filterType && { type: filterType as any }) 
+    },
+    orderBy: { date: 'desc' }, 
+    take: 20, 
+    include: { workspace: true, category: true }
   });
 
   // AGREGAR TOTAIS

@@ -57,6 +57,7 @@ export const authOptions: NextAuthOptions = {
 
   session: {
     strategy: "jwt",
+    maxAge: 6 * 60 * 60, // 6 horas (em segundos). Força a expiração do token.
   },
 
   providers: [
@@ -77,7 +78,6 @@ export const authOptions: NextAuthOptions = {
     async signIn({ user, profile }) {
       if (user.email) {
         try {
-          // --- CORREÇÃO AQUI ---
           // Verifica se o usuário JÁ EXISTE antes de tentar atualizar.
           // Se não existir, não faz nada (o createUser lá em cima vai cuidar dele).
           const existingUser = await prisma.user.findUnique({ 
@@ -102,7 +102,7 @@ export const authOptions: NextAuthOptions = {
       }
       return true;
     },
-async jwt({ token, user, trigger }) {
+    async jwt({ token, user, trigger }) {
       if (user) {
         token.id = user.id;
         token.email = user.email;
@@ -118,7 +118,6 @@ async jwt({ token, user, trigger }) {
             token.tenantId = dbUser.tenantId;
             token.subscriptionStatus = dbUser.tenant.subscriptionStatus;
             token.role = dbUser.role;
-            // ADICIONADO:
             token.nextPayment = dbUser.tenant.nextPayment; 
          }
       }

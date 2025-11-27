@@ -15,7 +15,7 @@ interface DateMonthSelectorProps {
   prefix?: string;
   keysToReset?: string[];
   className?: string;
-  isIconTrigger?: boolean; // <--- NOVA PROP
+  isIconTrigger?: boolean; 
 }
 
 export function DateMonthSelector({ prefix = "", keysToReset = [], className, isIconTrigger = false }: DateMonthSelectorProps) {
@@ -67,7 +67,7 @@ export function DateMonthSelector({ prefix = "", keysToReset = [], className, is
     params.delete(keyFrom);
     params.delete(keyTo);
     clearKeys(params);
-    router.push(`${pathname}?${params.toString()}`, { scroll: false });
+    router.push(`${pathname}?${params.toString()}`);
   };
 
   const handleRangeSelect = (range: DateRange | undefined) => {
@@ -79,7 +79,7 @@ export function DateMonthSelector({ prefix = "", keysToReset = [], className, is
         params.set(keyTo, format(range.to, 'yyyy-MM-dd'));
         params.delete(keyMonth);
         clearKeys(params);
-        router.push(`${pathname}?${params.toString()}`, { scroll: false });
+        router.push(`${pathname}?${params.toString()}`);
         setOpen(false);
       } else {
         params.delete(keyMonth); 
@@ -93,14 +93,13 @@ export function DateMonthSelector({ prefix = "", keysToReset = [], className, is
       params.delete(keyFrom);
       params.delete(keyTo);
       params.delete(keyMonth);
-      router.push(`${pathname}?${params.toString()}`, { scroll: false });
+      router.push(`${pathname}?${params.toString()}`);
       setDateRange(undefined);
   };
 
-  // --- ESTADO ATIVO ---
   const isActive = !!(paramFrom && paramTo) || !!paramMonth;
   
-  // --- MODO ÍCONE PURO (Hidden Style) ---
+  // MODO ÍCONE PURO (Para filtros específicos de card)
   if (isIconTrigger) {
       return (
         <Popover open={open} onOpenChange={setOpen}>
@@ -111,17 +110,17 @@ export function DateMonthSelector({ prefix = "", keysToReset = [], className, is
                         isActive ? "text-blue-500" : "text-muted-foreground hover:text-foreground",
                         className
                     )}
-                    title="Filtrar gráfico"
+                    title="Filtrar este gráfico"
                 >
                     <CalendarIcon className="w-4 h-4" />
                 </button>
             </PopoverTrigger>
             <PopoverContent className="w-auto p-0" align="start">
-                <div className="p-3 border-b border-border flex justify-between items-center">
-                    <span className="text-xs font-medium text-muted-foreground">Filtro do Gráfico</span>
+                <div className="p-3 border-b border-border flex justify-between items-center bg-muted/30">
+                    <span className="text-xs font-medium text-muted-foreground">Período do Gráfico</span>
                     {isActive && (
                         <button onClick={handleClear} className="text-xs text-rose-500 hover:underline">
-                            Limpar
+                            Limpar Filtro
                         </button>
                     )}
                 </div>
@@ -140,7 +139,7 @@ export function DateMonthSelector({ prefix = "", keysToReset = [], className, is
       );
   }
 
-  // --- MODO PADRÃO (Botão com Texto e Setas) ---
+  // MODO PADRÃO (Cabeçalho)
   let label = "";
   if (paramFrom && paramTo) {
     label = `${format(parseISO(paramFrom), "dd MMM", { locale: ptBR })} - ${format(parseISO(paramTo), "dd MMM", { locale: ptBR })}`;
@@ -161,7 +160,7 @@ export function DateMonthSelector({ prefix = "", keysToReset = [], className, is
           <Button
             variant="ghost"
             className={cn(
-              "h-7 px-2 text-xs font-medium capitalize min-w-[110px] justify-center group relative",
+              "h-7 px-2 text-xs font-medium capitalize min-w-[140px] justify-center group relative",
               isActive && prefix ? "text-blue-500" : "",
               (!isActive && !prefix) && "text-foreground"
             )}

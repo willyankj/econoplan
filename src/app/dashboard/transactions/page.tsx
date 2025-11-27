@@ -6,7 +6,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CreditCard, CheckCircle2, Clock, CheckCheck } from "lucide-react";
-import * as Icons from "lucide-react"; // <--- IMPORT para renderizar ícones dinâmicos
+import * as Icons from "lucide-react"; // Import para os ícones dinâmicos das categorias
 
 import { DeleteTransactionButton } from "./delete-button";
 import { TransactionModal } from "@/components/dashboard/transaction-modal";
@@ -17,6 +17,10 @@ import { BankLogo } from "@/components/ui/bank-logo";
 import { getUserWorkspace } from "@/lib/get-user-workspace"; 
 import { ImportTransactionsModal } from "@/components/dashboard/transactions/import-modal"; 
 import { formatCurrency } from "@/lib/utils";
+
+// --- NOVOS IMPORTS (Recorrências) ---
+import { getRecurringTransactions } from "@/app/dashboard/actions";
+import { RecurringModal } from "@/components/dashboard/transactions/recurring-modal";
 
 export const dynamic = 'force-dynamic';
 
@@ -37,9 +41,13 @@ export default async function TransactionsPage({
   const rawCards = await prisma.creditCard.findMany({ where: { workspaceId }, orderBy: { name: 'asc' } });
   const cards = rawCards.map(c => ({ ...c, limit: Number(c.limit) }));
 
+  // Busca categorias para passar aos modais
   const categories = await prisma.category.findMany({ where: { workspaceId }, orderBy: { name: 'asc' } });
 
-  // 2. CONSTRUÇÃO DO FILTRO (WHERE)
+  // 2. BUSCA AS RECORRÊNCIAS ATIVAS (Para o novo botão de gestão)
+  const recurringTransactions = await getRecurringTransactions();
+
+  // 3. CONSTRUÇÃO DO FILTRO (WHERE)
   const whereCondition: any = { 
     workspaceId,
   };
@@ -92,19 +100,27 @@ export default async function TransactionsPage({
             {transactions.length} lançamento(s) encontrado(s)
           </p>
         </div>
-          <div className="flex gap-2 w-full md:w-auto">
+          
+          {/* BARRA DE AÇÕES */}
+          <div className="flex gap-2 w-full md:w-auto flex-wrap md:flex-nowrap">
+            {/* 1. Botão de Gestão de Recorrências */}
+            <RecurringModal transactions={recurringTransactions} />
+
+            {/* 2. Botão de Importar (Agora recebe categorias) */}
             {!params.cardId && (
-                <ImportTransactionsModal accounts={accounts} />
+                <ImportTransactionsModal accounts={accounts} categories={categories} />
             )}
+            
+            {/* 3. Filtros e Exportação */}
             <TransactionFilterButton accounts={accounts} cards={cards} categories={categories} />
             <ExportButton data={transactionsForExport} />
           </div>
       </div>
 
       <Card className="bg-card border-border shadow-sm overflow-hidden mx-1">
-        <CardHeader className="border-b border-border bg-muted/40 px-6 py-4 flex flex-row justify-between items-center">
+        <CardHeader className="border-b border-border bg-muted/40 px-6 py-4 flex flex-row justify-between items-center gap-4">
             <SearchInput />
-            {/* BOTÃO DE NOVA TRANSAÇÃO: Agora recebe as categorias */}
+            {/* Botão Nova Transação (Criação Rápida no Extrato) */}
             <TransactionModal accounts={accounts} cards={cards} categories={categories} />
         </CardHeader>
         
@@ -171,7 +187,6 @@ export default async function TransactionsPage({
                         )}
                     </TableCell>
 
-                    {/* COLUNA DE CATEGORIA ATUALIZADA */}
                     <TableCell>
                         <Badge variant="outline" className="bg-muted text-muted-foreground border-border font-normal gap-1 pr-3">
                             {(() => {
@@ -197,8 +212,8 @@ export default async function TransactionsPage({
                     
                     <TableCell className="text-right">
                         <div className="flex justify-end items-center gap-1">
-                            {/* MODAL DE EDIÇÃO: Agora recebe as categorias */}
-                            <TransactionModal transaction={transactionForModal} categories={categories} />
+                            {/* Modal de Edição (Passando categorias) */}
+                            <TransactionModal transaction={transactionForModal} accounts={accounts} cards={cards} categories={categories} />
                             <DeleteTransactionButton id={t.id} />
                         </div>
                     </TableCell>

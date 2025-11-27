@@ -5,8 +5,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Plus, Pencil, Loader2, CreditCard, Landmark } from "lucide-react";
-import { upsertTransaction } from '@/app/dashboard/actions';
+import { Plus, Pencil, Loader2, CreditCard, Landmark, AlertTriangle, Ban } from "lucide-react";
+import { upsertTransaction, stopTransactionRecurrence } from '@/app/dashboard/actions';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CategoryCombobox } from '@/components/dashboard/categories/category-combobox';
@@ -23,6 +23,7 @@ interface Props {
 export function TransactionModal({ transaction, accounts = [], cards = [], categories = [] }: Props) {
   const [open, setOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isStopping, setIsStopping] = useState(false); // Estado para o botão de cancelar recorrência
   
   // Estados
   const [paymentMethod, setPaymentMethod] = useState('ACCOUNT');
@@ -48,24 +49,37 @@ export function TransactionModal({ transaction, accounts = [], cards = [], categ
     }
   }, [type]);
 
+  // Função para cancelar recorrência
+  const handleStopRecurrence = async () => {
+    if (!confirm("Deseja parar de repetir esta despesa? As cobranças futuras automáticas serão canceladas.")) return;
+    
+    setIsStopping(true);
+    const result = await stopTransactionRecurrence(transaction.id);
+    setIsStopping(false);
+    
+    if (result?.error) {
+        toast.error(result.error);
+    } else {
+        toast.success("Recorrência cancelada!");
+        setOpen(false);
+    }
+  };
+
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
     
     const description = formData.get("description")?.toString().trim();
-    let amount = formData.get("amount")?.toString(); // 'let' para podermos alterar
+    let amount = formData.get("amount")?.toString(); 
     const date = formData.get("date")?.toString();
     const category = formData.get("category")?.toString();
 
-    // --- LÓGICA INVERTIDA PARA PARCELAMENTO ---
-    // Se for criação de parcelamento, o usuário digitou o valor da parcela.
-    // Precisamos multiplicar pelo número de parcelas para enviar o TOTAL ao backend.
-    // O backend depois vai dividir de novo, mas assim mantemos a consistência.
+    // Lógica invertida para parcelamento (Valor da Parcela -> Total)
     if (!isEditing && recurrence === 'INSTALLMENT' && installments > 1) {
         const installmentValue = parseFloat(amount || "0");
         const totalValue = installmentValue * installments;
         amount = totalValue.toString();
-        formData.set("amount", amount); // Atualiza o FormData com o valor total
+        formData.set("amount", amount); 
     }
 
     if (!description) return toast.error("A descrição é obrigatória.");
@@ -124,6 +138,32 @@ export function TransactionModal({ transaction, accounts = [], cards = [], categ
         <DialogHeader>
           <DialogTitle>{isEditing ? "Editar Transação" : "Nova Transação"}</DialogTitle>
         </DialogHeader>
+        
+        {/* --- SEÇÃO DE ALERTA DE RECORRÊNCIA (NOVO) --- */}
+        {isEditing && transaction?.isRecurring && (
+            <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 flex flex-col gap-2 mb-2">
+                <div className="flex items-center gap-2 text-amber-500 text-xs font-semibold uppercase tracking-wide">
+                    <AlertTriangle className="w-4 h-4" />
+                    Transação Recorrente
+                </div>
+                <div className="flex items-center justify-between">
+                    <p className="text-xs text-muted-foreground">
+                        Esta transação gera lançamentos automáticos todo mês.
+                    </p>
+                    <Button 
+                        type="button" 
+                        variant="ghost" 
+                        size="sm" 
+                        onClick={handleStopRecurrence}
+                        disabled={isStopping}
+                        className="h-7 text-xs text-rose-500 hover:text-rose-600 hover:bg-rose-500/10"
+                    >
+                        {isStopping ? <Loader2 className="w-3 h-3 animate-spin" /> : <Ban className="w-3 h-3 mr-1" />}
+                        Encerrar Recorrência
+                    </Button>
+                </div>
+            </div>
+        )}
         
         <form onSubmit={handleSubmit} className="grid gap-4 py-2">
           
@@ -215,7 +255,6 @@ export function TransactionModal({ transaction, accounts = [], cards = [], categ
 
           <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-2">
-                {/* Label dinâmico: Se for parcelado, avisa que é o valor da parcela */}
                 <Label className="text-xs">
                     {(!isEditing && recurrence === 'INSTALLMENT') ? 'Valor da Parcela (R$)' : 'Valor (R$)'}
                 </Label>

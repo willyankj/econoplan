@@ -95,9 +95,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
             <div className="flex items-center gap-4">
                <NotificationBell notifications={notifications} />
-               
-               {/* CORREÇÃO: Passando as categorias para o modal */}
-               <TransactionModal accounts={accounts} cards={cards} categories={categories} />
             </div>
         </header>
 

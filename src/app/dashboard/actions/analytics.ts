@@ -5,37 +5,41 @@ import { validateUser, getActiveWorkspaceId } from "@/lib/action-utils";
 import { addMonths, startOfMonth, endOfMonth, format, subMonths } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
-// --- HELPERS ---
 const toDecimal = (num: any) => Number(num) || 0;
 
 // ============================================================================
-// 1. ORÁCULO FINANCEIRO (Nível Tenant - Global)
+// 1. ORÁCULO FINANCEIRO (Tenant ou Workspace Específico)
 // ============================================================================
-export async function getTenantOracleData(monthsToProject = 6) {
+export async function getTenantOracleData(monthsToProject = 6, filterWorkspaceId?: string) {
   const { user } = await validateUser('org_view');
   if (!user) return { balanceData: [] };
 
   const today = new Date();
   const endDate = addMonths(today, monthsToProject);
 
-  // 1. Saldo Atual Global (Todas as contas de todos os workspaces)
+  // Filtro dinâmico: Se tiver ID, filtra pelo ID. Se não, pega todos do Tenant.
+  const workspaceFilter = filterWorkspaceId 
+    ? { id: filterWorkspaceId, tenantId: user.tenantId }
+    : { tenantId: user.tenantId };
+
+  // 1. Saldo Atual
   const accounts = await prisma.bankAccount.findMany({
-    where: { workspace: { tenantId: user.tenantId } }
+    where: { workspace: workspaceFilter }
   });
   let currentBalance = accounts.reduce((acc, cur) => acc + toDecimal(cur.balance), 0);
 
-  // 2. Transações Futuras (Parcelas/Agendamentos de todo o tenant)
+  // 2. Transações Futuras
   const futureTransactions = await prisma.transaction.findMany({
     where: {
-      workspace: { tenantId: user.tenantId },
+      workspace: workspaceFilter,
       date: { gt: today, lte: endDate }
     }
   });
 
-  // 3. Recorrências (Assinaturas ativas de todo o tenant)
+  // 3. Recorrências
   const recurringTransactions = await prisma.transaction.findMany({
     where: {
-      workspace: { tenantId: user.tenantId },
+      workspace: workspaceFilter,
       isRecurring: true,
     }
   });
@@ -49,12 +53,12 @@ export async function getTenantOracleData(monthsToProject = 6) {
     const monthEnd = endOfMonth(currentDate);
     const monthLabel = format(currentDate, 'MMM', { locale: ptBR }).toUpperCase();
 
-    // A. Real (Agendado)
+    // A. Real
     const monthRealTx = futureTransactions.filter(t => t.date >= monthStart && t.date <= monthEnd);
     const incomeReal = monthRealTx.filter(t => t.type === 'INCOME').reduce((sum, t) => sum + toDecimal(t.amount), 0);
     const expenseReal = monthRealTx.filter(t => t.type === 'EXPENSE').reduce((sum, t) => sum + toDecimal(t.amount), 0);
 
-    // B. Projetado (Recorrência)
+    // B. Projetado
     let incomeProjected = 0;
     let expenseProjected = 0;
 
@@ -66,9 +70,7 @@ export async function getTenantOracleData(monthsToProject = 6) {
     }
 
     const netChange = (incomeReal + incomeProjected) - (expenseReal + expenseProjected);
-    
-    if (i === 0) runningBalance += netChange; 
-    else runningBalance += netChange;
+    runningBalance += netChange;
 
     timeline.push({
         name: monthLabel,
@@ -83,18 +85,22 @@ export async function getTenantOracleData(monthsToProject = 6) {
 }
 
 // ============================================================================
-// 2. RAIO-X DE ENDIVIDAMENTO (Nível Tenant - Global)
+// 2. RAIO-X DE ENDIVIDAMENTO
 // ============================================================================
-export async function getTenantDebtXRayData() {
+export async function getTenantDebtXRayData(filterWorkspaceId?: string) {
   const { user } = await validateUser('org_view');
   if (!user) return { chartData: [], cardNames: [] };
 
   const today = new Date();
   const endDate = addMonths(today, 11); 
 
+  const workspaceFilter = filterWorkspaceId 
+    ? { id: filterWorkspaceId, tenantId: user.tenantId }
+    : { tenantId: user.tenantId };
+
   const cardTransactions = await prisma.transaction.findMany({
     where: {
-      workspace: { tenantId: user.tenantId }, // Todo o tenant
+      workspace: workspaceFilter,
       type: 'EXPENSE',
       creditCardId: { not: null },
       date: { gte: startOfMonth(today), lte: endDate }
@@ -130,7 +136,7 @@ export async function getTenantDebtXRayData() {
 }
 
 // ============================================================================
-// 3. COMPARATIVO MÊS A MÊS (Nível Workspace - Específico)
+// 3. COMPARATIVO MÊS A MÊS (Workspace Local)
 // ============================================================================
 export async function getWorkspaceCategoryComparison() {
     const { user } = await validateUser();
@@ -141,11 +147,9 @@ export async function getWorkspaceCategoryComparison() {
     const currentStart = startOfMonth(today);
     const currentEnd = endOfMonth(today);
 
-    // Últimos 3 meses (para média)
     const pastStart = startOfMonth(subMonths(today, 3));
     const pastEnd = endOfMonth(subMonths(today, 1));
 
-    // Busca transações
     const transactions = await prisma.transaction.findMany({
         where: {
             workspaceId,
@@ -156,7 +160,6 @@ export async function getWorkspaceCategoryComparison() {
         include: { category: true }
     });
 
-    // Agrupa
     const currentMap = new Map<string, number>();
     const historyMap = new Map<string, number>();
 
@@ -171,86 +174,73 @@ export async function getWorkspaceCategoryComparison() {
         }
     });
 
-    // Monta o relatório
     const report = Array.from(currentMap.keys()).map(cat => {
         const current = currentMap.get(cat) || 0;
         const totalHistory = historyMap.get(cat) || 0;
-        const average = totalHistory / 3; // Média simples dos últimos 3 meses
+        const average = totalHistory / 3; 
 
         let status = "neutral";
         let diffPercent = 0;
 
         if (average > 0) {
             diffPercent = ((current - average) / average) * 100;
-            if (diffPercent > 15) status = "danger"; // Gastou 15% a mais
-            else if (diffPercent < -15) status = "success"; // Economizou 15%
+            if (diffPercent > 15) status = "danger"; 
+            else if (diffPercent < -15) status = "success"; 
         } else if (current > 0) {
-            status = "danger"; // Gasto novo
+            status = "danger"; 
             diffPercent = 100;
         }
 
         return { category: cat, current, average, diffPercent, status };
     });
 
-    // Ordena pelos maiores "ofensores" (maior diferença em R$)
     return report.sort((a, b) => (b.current - b.average) - (a.current - a.average));
 }
 
 // ============================================================================
-// 4. ÍNDICE DE SAÚDE FINANCEIRA (Nível Tenant - Gamification)
+// 4. ÍNDICE DE SAÚDE FINANCEIRA
 // ============================================================================
-export async function getTenantHealthScore() {
+export async function getTenantHealthScore(filterWorkspaceId?: string) {
     const { user } = await validateUser('org_view');
     if (!user) return { score: 0, metrics: {} };
 
-    // Pega dados dos últimos 30 dias
     const today = new Date();
     const start = subMonths(today, 1);
 
+    const workspaceFilter = filterWorkspaceId 
+    ? { id: filterWorkspaceId, tenantId: user.tenantId }
+    : { tenantId: user.tenantId };
+
     const transactions = await prisma.transaction.findMany({
         where: {
-            workspace: { tenantId: user.tenantId },
+            workspace: workspaceFilter,
             date: { gte: start }
         }
     });
 
     const accounts = await prisma.bankAccount.findMany({
-        where: { workspace: { tenantId: user.tenantId } }
+        where: { workspace: workspaceFilter }
     });
 
-    const budgets = await prisma.budget.findMany({
-        where: { workspace: { tenantId: user.tenantId } },
-        include: { category: true }
-    });
-
-    // Cálculos
     const totalIncome = transactions.filter(t => t.type === 'INCOME').reduce((acc, t) => acc + toDecimal(t.amount), 0);
     const totalExpense = transactions.filter(t => t.type === 'EXPENSE').reduce((acc, t) => acc + toDecimal(t.amount), 0);
     const totalBalance = accounts.reduce((acc, a) => acc + toDecimal(a.balance), 0);
 
-    // 1. Taxa de Poupança (Peso 40)
-    // Ideal: > 20%
     const savingsRate = totalIncome > 0 ? ((totalIncome - totalExpense) / totalIncome) * 100 : 0;
     let savingsScore = 0;
     if (savingsRate >= 20) savingsScore = 40;
-    else if (savingsRate > 0) savingsScore = savingsRate * 2; // Proporcional
+    else if (savingsRate > 0) savingsScore = savingsRate * 2;
     else savingsScore = 0;
 
-    // 2. Cobertura de Reserva (Peso 40)
-    // Ideal: Saldo cobre > 3 meses de despesas
-    const monthlyAvgExpense = totalExpense || 1; // Evita div por 0
+    const monthlyAvgExpense = totalExpense || 1; 
     const coverageMonths = totalBalance / monthlyAvgExpense;
     let coverageScore = 0;
     if (coverageMonths >= 3) coverageScore = 40;
     else coverageScore = (coverageMonths / 3) * 40;
 
     // 3. Aderência ao Orçamento (Peso 20)
-    // Perde pontos por budget estourado
     let budgetScore = 20;
-    // Precisaríamos calcular o gasto de cada budget, simplificando aqui:
-    // Se houver budgets, vamos assumir uma penalidade fixa por enquanto ou implementar a lógica completa.
-    // Para MVP, vamos dar 20 se o saldo for positivo.
-    if (savingsRate < 0) budgetScore = 0;
+    if (savingsRate < 0 || totalIncome === 0) budgetScore = 0;
 
     const totalScore = Math.min(100, Math.round(savingsScore + coverageScore + budgetScore));
 

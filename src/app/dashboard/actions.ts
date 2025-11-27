@@ -21,7 +21,9 @@ import {
   payCreditCardInvoice as _payCreditCardInvoice,
   upsertTransaction as _upsertTransaction,
   deleteTransaction as _deleteTransaction,
-  importTransactions as _importTransactions
+  importTransactions as _importTransactions,
+  stopTransactionRecurrence as _stopTransactionRecurrence,
+  getRecurringTransactions as _getRecurringTransactions
 } from './actions/finance';
 
 import {
@@ -66,6 +68,8 @@ export const payCreditCardInvoice = _payCreditCardInvoice;
 export const upsertTransaction = _upsertTransaction;
 export const deleteTransaction = _deleteTransaction;
 export const importTransactions = _importTransactions;
+export const stopTransactionRecurrence = _stopTransactionRecurrence;
+export const getRecurringTransactions = _getRecurringTransactions;
 
 // Categories
 export const upsertCategory = _upsertCategory;

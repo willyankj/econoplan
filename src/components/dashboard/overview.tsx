@@ -1,17 +1,17 @@
 'use client';
 
 import { 
-  ArrowUpRight, ArrowDownRight, DollarSign, ShieldCheck, PieChart, Calendar, Target
+  ArrowUpRight, ArrowDownRight, DollarSign, ShieldCheck, PieChart, Target
 } from 'lucide-react';
 import { 
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer 
 } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { DepositGoalModal } from "@/components/dashboard/goals/deposit-goal-modal";
 import { formatCurrency } from "@/lib/utils";
-import { InfoHelp } from "@/components/dashboard/info-help"; // <--- IMPORT NOVO
+import { InfoHelp } from "@/components/dashboard/info-help";
+import { DateMonthSelector } from "@/components/dashboard/date-month-selector"; // <--- REINSERIDO
 
 interface DashboardData {
   totalBalance: number;
@@ -51,6 +51,9 @@ export function DashboardOverview({ data }: { data: DashboardData }) {
           <p className="text-muted-foreground">Dados em tempo real do <span className="text-emerald-500">Econoplan</span></p>
         </div>
         <div className="flex gap-2 items-center">
+           {/* SELETOR GLOBAL VOLTOU AQUI */}
+           <DateMonthSelector keysToReset={['chart']} />
+           
            <span className="hidden md:flex px-3 py-1 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-500 text-xs items-center gap-1 h-8">
              <ShieldCheck className="w-3 h-3" /> Ambiente Seguro
            </span>
@@ -110,7 +113,9 @@ export function DashboardOverview({ data }: { data: DashboardData }) {
         
         <Card className="lg:col-span-2 bg-card border-border shadow-sm">
           <div className="p-6 flex items-center gap-2">
-             <Calendar className="w-4 h-4 text-muted-foreground" />
+             {/* SELETOR ESPECÍFICO (NO ÍCONE) VOLTOU AQUI */}
+             <DateMonthSelector prefix="chart" isIconTrigger={true} />
+             
              <h3 className="font-semibold text-lg text-foreground">Fluxo de Caixa</h3>
              <InfoHelp title="Histórico Financeiro">
                 Acompanhe a evolução das suas entradas (verde) e saídas (vermelho) ao longo do tempo. Ideal para identificar meses com gastos atípicos.
