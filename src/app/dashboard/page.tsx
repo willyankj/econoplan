@@ -1,7 +1,13 @@
 import { prisma } from "@/lib/prisma";
 import { DashboardOverview } from "@/components/dashboard/overview";
 import { getUserWorkspace } from "@/lib/get-user-workspace";
-import { getWorkspaceCategoryComparison, getUpcomingBills } from "@/app/dashboard/actions";
+
+// MUDANÇA: Importando TUDO de "actions" centralizado
+import { 
+    getWorkspaceCategoryComparison, 
+    getUpcomingBills 
+} from "@/app/dashboard/actions";
+
 import { CategoryComparison } from "@/components/dashboard/analytics/category-comparison";
 import { UpcomingBills } from "@/components/dashboard/upcoming-bills";
 import { startOfMonth, endOfMonth } from "date-fns";
@@ -49,12 +55,12 @@ export default async function DashboardPage({
     ? getDatesFromParams(params.chartFrom, params.chartTo, params.chartMonth)
     : globalDates;
 
-  // 1. SALDO TOTAL (Otimizado: Soma direta no banco)
-  const accounts = await prisma.bankAccount.findMany({ where: { workspaceId }, orderBy: { name: 'asc' } });
-  const totalBalance = accounts.reduce((acc, a) => acc + toDecimal(a.balance), 0);
+  // 1. SALDO TOTAL
+  const rawAccounts = await prisma.bankAccount.findMany({ where: { workspaceId }, orderBy: { name: 'asc' } });
+  const accounts = rawAccounts.map(acc => ({ ...acc, balance: Number(acc.balance) }));
+  const totalBalance = accounts.reduce((acc, a) => acc + a.balance, 0);
 
-  // 2. TOTAIS MENSAIS (Otimizado: Agregação no Banco)
-  // Filtramos fora o cartão de crédito para pegar fluxo de caixa real
+  // 2. TOTAIS MENSAIS (Agregação)
   const incomeAgg = await prisma.transaction.aggregate({
       _sum: { amount: true },
       where: { workspaceId, type: 'INCOME', creditCardId: null, date: { gte: globalDates.startDate, lte: globalDates.endDate } }
@@ -64,7 +70,7 @@ export default async function DashboardPage({
       where: { workspaceId, type: 'EXPENSE', creditCardId: null, date: { gte: globalDates.startDate, lte: globalDates.endDate } }
   });
 
-  // 3. DADOS DO GRÁFICO (Leve: Só campos necessários)
+  // 3. DADOS DO GRÁFICO
   const chartTransactions = await prisma.transaction.findMany({
       where: { workspaceId, creditCardId: null, date: { gte: chartDates.startDate, lte: chartDates.endDate } },
       select: { date: true, amount: true, type: true },
@@ -106,17 +112,15 @@ export default async function DashboardPage({
     }
   });
 
-  // 4. ORÇAMENTOS (Otimizado: GroupBy no banco)
+  // 4. ORÇAMENTOS
   const budgets = await prisma.budget.findMany({ where: { workspaceId }, include: { category: true } });
   
-  // Agrupa gastos por categoria direto no banco
   const expensesByCategory = await prisma.transaction.groupBy({
       by: ['categoryId'],
       _sum: { amount: true },
       where: { workspaceId, type: 'EXPENSE', categoryId: { not: null }, date: { gte: globalDates.startDate, lte: globalDates.endDate } }
   });
   
-  // Cria mapa para acesso rápido
   const expMap = new Map();
   expensesByCategory.forEach(e => { if(e.categoryId) expMap.set(e.categoryId, toDecimal(e._sum.amount)); });
 
@@ -129,7 +133,7 @@ export default async function DashboardPage({
   const rawGoals = await prisma.goal.findMany({ where: { workspaceId }, orderBy: [{ deadline: 'asc' }, { createdAt: 'desc' }], take: 3 });
   const goals = rawGoals.map(g => ({ ...g, targetAmount: Number(g.targetAmount), currentAmount: Number(g.currentAmount) }));
 
-  // 6. WIDGETS EXTRAS
+  // 6. WIDGETS EXTRAS (Chamada Segura)
   const comparisonData = await getWorkspaceCategoryComparison();
   const upcomingBills = await getUpcomingBills();
 
@@ -138,10 +142,10 @@ export default async function DashboardPage({
     monthlyIncome: toDecimal(incomeAgg._sum.amount), 
     monthlyExpense: toDecimal(expenseAgg._sum.amount),
     chartData: Array.from(chartMap.values()), 
-    lastTransactions: [], // Não usamos mais aqui, economiza banda
+    lastTransactions: [], 
     budgets: budgetList, 
     goals,
-    accounts
+    accounts 
   };
 
   return (

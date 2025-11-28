@@ -24,7 +24,7 @@ import {
   importTransactions as _importTransactions,
   stopTransactionRecurrence as _stopTransactionRecurrence,
   getRecurringTransactions as _getRecurringTransactions,
-  getUpcomingBills as _getUpcomingBills
+  getUpcomingBills as _getUpcomingBills // <--- Certifique-se que este está aqui
 } from './actions/finance';
 
 import {
@@ -43,6 +43,16 @@ import {
     upsertCategory as _upsertCategory,
     deleteCategory as _deleteCategory
 } from './actions/categories';
+
+// ANALYTICS (IMPORTADOS DIRETAMENTE DO ARQUIVO ORIGINAL PARA EVITAR ERRO DE LINK)
+// A melhor prática é importar analytics direto na página, mas se você usa via actions.ts, precisa exportar:
+import {
+    getWorkspaceCategoryComparison as _getWorkspaceCategoryComparison,
+    getTenantOracleData as _getTenantOracleData,
+    getTenantDebtXRayData as _getTenantDebtXRayData,
+    getTenantHealthScore as _getTenantHealthScore
+} from './actions/analytics';
+
 
 // =================================================
 // EXPORTS UNIFICADOS
@@ -82,7 +92,6 @@ export const upsertBudget = _upsertBudget;
 export const deleteBudget = _deleteBudget;
 export const upsertGoal = _upsertGoal;
 export const deleteGoal = _deleteGoal;
-// Helper para movimentação de meta (add/withdraw)
 export const addMoneyToGoal = async (id: string, amount: number, accId: string) => _moveMoneyGoal(id, amount, accId, 'DEPOSIT');
 export const withdrawMoneyFromGoal = async (id: string, amount: number, accId: string) => _moveMoneyGoal(id, amount, accId, 'WITHDRAW');
 
@@ -90,3 +99,9 @@ export const getNotifications = _getNotifications;
 export const markNotificationAsRead = _markNotificationAsRead;
 export const markAllNotificationsAsRead = _markAllNotificationsAsRead;
 export const checkDeadlinesAndSendAlerts = _checkDeadlinesAndSendAlerts;
+
+// Analytics (Novos Exports)
+export const getWorkspaceCategoryComparison = _getWorkspaceCategoryComparison;
+export const getTenantOracleData = _getTenantOracleData;
+export const getTenantDebtXRayData = _getTenantDebtXRayData;
+export const getTenantHealthScore = _getTenantHealthScore;

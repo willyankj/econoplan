@@ -6,10 +6,11 @@ import { createAuditLog } from "@/lib/audit";
 import { validateUser, getActiveWorkspaceId } from "@/lib/action-utils";
 import { z } from "zod";
 import { v4 as uuidv4 } from 'uuid';
+import { notifyBudgetExceeded, notifyBudgetWarning } from "@/lib/notifications";
 import { createHash } from "crypto";
-import { addDays } from "date-fns";
+import { addDays, differenceInDays, addMonths } from "date-fns"; // <--- AQUI ESTAVA O PROBLEMA (IMPORT CORRIGIDO)
 
-// --- UTILITÁRIO DE HASH ---
+// --- UTILITÁRIO DE HASH SERVER-SIDE ---
 function generateTransactionHash(date: Date, amount: number, description: string): string {
     const str = `${date.toISOString().split('T')[0]}|${amount.toFixed(2)}|${description.trim().toLowerCase()}`;
     return createHash('md5').update(str).digest('hex');
@@ -271,6 +272,7 @@ export async function deleteTransaction(id: string) {
         await prisma.bankAccount.update({ where: { id: t.bankAccountId }, data: { balance: { [op]: t.amount } } });
     }
 
+    // DELETE EM CASCATA PARA PARCELAMENTOS
     if (t.isInstallment && t.installmentId) {
         await prisma.transaction.deleteMany({ where: { workspaceId: t.workspaceId, installmentId: t.installmentId } });
         await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'DELETE', entity: 'Transaction', details: `Apagou compra parcelada: ${t.description}` });
@@ -284,7 +286,6 @@ export async function deleteTransaction(id: string) {
   return { success: true };
 }
 
-// --- OTIMIZAÇÃO 1: IMPORTAÇÃO EM LOTE (BATCH) ---
 export async function importTransactions(accountId: string, transactions: any[]) {
     const { user, error } = await validateUser('transactions_create');
     if (error || !user) return { error };
@@ -292,134 +293,70 @@ export async function importTransactions(accountId: string, transactions: any[])
     const account = await prisma.bankAccount.findUnique({ where: { id: accountId } });
     if (!account) return { error: "Conta não encontrada" };
 
-    // 1. Prepara os dados e calcula Hashes
-    const preparedTransactions = [];
-    let netBalanceChange = 0;
-    const externalIdsToCheck: string[] = [];
-    const hashesToCheck: string[] = [];
-
-    for (const t of transactions) {
-        if (!t.date || isNaN(Number(t.amount)) || !t.description) continue;
-        
-        const date = new Date(t.date);
-        const amount = Math.abs(Number(t.amount));
-        const type = t.amount >= 0 ? 'INCOME' : 'EXPENSE';
-        const externalId = t.externalId || null;
-        const importHash = externalId ? null : generateTransactionHash(date, amount, t.description);
-
-        if (externalId) externalIdsToCheck.push(externalId);
-        if (importHash) hashesToCheck.push(importHash);
-
-        preparedTransactions.push({
-            raw: t,
-            data: {
-                description: t.description,
-                amount,
-                type,
-                date,
-                workspaceId: account.workspaceId,
-                bankAccountId: accountId,
-                categoryId: t.categoryId, // Pode ser null/undefined se não veio
-                categoryName: t.categoryName || "Importados",
-                isPaid: true,
-                externalId,
-                importHash
-            }
-        });
-    }
-
-    if (preparedTransactions.length === 0) return { error: "Nenhuma transação válida." };
+    let count = 0;
+    let skipped = 0;
 
     try {
         await prisma.$transaction(async (tx) => {
-            
-            // 2. Busca Duplicatas em Lote
-            const existing = await tx.transaction.findMany({
-                where: {
-                    workspaceId: account.workspaceId,
-                    OR: [
-                        { externalId: { in: externalIdsToCheck.length ? externalIdsToCheck : undefined } },
-                        { importHash: { in: hashesToCheck.length ? hashesToCheck : undefined } }
-                    ]
-                },
-                select: { externalId: true, importHash: true }
-            });
+            for (const t of transactions) {
+                if (!t.date || isNaN(Number(t.amount)) || !t.description) continue;
 
-            const existingSet = new Set([
-                ...existing.map(e => e.externalId).filter(Boolean),
-                ...existing.map(e => e.importHash).filter(Boolean)
-            ]);
-
-            // 3. Filtra e Prepara para Inserção
-            const toInsert = [];
-            const categoriesToUpsert = new Map(); // Cache local de categorias para criar
-
-            for (const item of preparedTransactions) {
-                const { externalId, importHash, categoryId, categoryName, type } = item.data;
+                const date = new Date(t.date);
+                const transactionType = t.amount >= 0 ? 'INCOME' : 'EXPENSE';
+                const absAmount = Math.abs(Number(t.amount));
                 
-                if ((externalId && existingSet.has(externalId)) || (importHash && existingSet.has(importHash))) {
-                    continue; // Pula duplicata
+                const externalId = t.externalId || null;
+                const importHash = t.externalId ? null : generateTransactionHash(date, absAmount, t.description);
+
+                const existing = await tx.transaction.findFirst({
+                    where: {
+                        workspaceId: account.workspaceId,
+                        OR: [
+                            ...(externalId ? [{ externalId }] : []),
+                            ...(importHash ? [{ importHash }] : [])
+                        ]
+                    }
+                });
+
+                if (existing) {
+                    skipped++;
+                    continue;
                 }
                 
-                // Se não tem ID de categoria, prepara para buscar/criar
-                if (!categoryId) {
-                    const key = `${categoryName}-${type}`;
-                    categoriesToUpsert.set(key, { name: categoryName, type });
+                let finalCategoryId = t.categoryId; 
+                if (!finalCategoryId) {
+                    const categoryName = t.categoryName || "Importados";
+                    const cat = await tx.category.upsert({
+                        where: { workspaceId_name_type: { workspaceId: account.workspaceId, name: categoryName, type: transactionType } },
+                        update: {}, create: { name: categoryName, type: transactionType, workspaceId: account.workspaceId }
+                    });
+                    finalCategoryId = cat.id;
                 }
 
-                // Calcula saldo apenas dos novos
-                if (type === 'INCOME') netBalanceChange += item.data.amount;
-                else netBalanceChange -= item.data.amount;
-
-                toInsert.push(item.data);
-            }
-
-            if (toInsert.length === 0) return; // Nada novo
-
-            // 4. Resolve Categorias em Lote (Upsert não tem createMany, então fazemos loop otimizado)
-            // Para não travar, criamos um mapa de ID de categoria
-            const categoryIdMap = new Map();
-            
-            for (const [key, catData] of categoriesToUpsert.entries()) {
-                // Upsert é rápido o suficiente para algumas categorias
-                const cat = await tx.category.upsert({
-                    where: { workspaceId_name_type: { workspaceId: account.workspaceId, name: catData.name, type: catData.type } },
-                    update: {}, create: { name: catData.name, type: catData.type, workspaceId: account.workspaceId }
+                await tx.transaction.create({
+                    data: { 
+                        description: t.description, amount: absAmount, type: transactionType, date, 
+                        workspaceId: account.workspaceId, bankAccountId: accountId, categoryId: finalCategoryId, isPaid: true,
+                        externalId, importHash 
+                    }
                 });
-                categoryIdMap.set(key, cat.id);
-            }
 
-            // 5. Atribui IDs de categoria e Insere Transações (createMany é MUITO rápido)
-            const finalData = toInsert.map(item => {
-                let catId = item.categoryId;
-                if (!catId) {
-                    const key = `${item.categoryName}-${item.type}`;
-                    catId = categoryIdMap.get(key);
-                }
-                // Remove campos auxiliares que não vão pro banco
-                const { categoryName, ...dbData } = item;
-                return { ...dbData, categoryId: catId };
-            });
-
-            await tx.transaction.createMany({ data: finalData });
-
-            // 6. Atualiza Saldo (Uma única vez)
-            if (netBalanceChange !== 0) {
-                const op = netBalanceChange > 0 ? 'increment' : 'decrement';
-                await tx.bankAccount.update({
-                    where: { id: accountId },
-                    data: { balance: { [op]: Math.abs(netBalanceChange) } }
-                });
+                const op = transactionType === 'INCOME' ? 'increment' : 'decrement';
+                await tx.bankAccount.update({ where: { id: accountId }, data: { balance: { [op]: absAmount } } });
+                count++;
             }
         });
         
-        await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'CREATE', entity: 'Transaction', details: `Importação em lote realizada` });
-        
-    } catch(e) { 
-        console.error(e);
-        return { error: "Erro na importação em lote." }; 
-    }
+        if (count > 0) {
+            await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'CREATE', entity: 'Transaction', details: `Importou ${count} (Pulou ${skipped})` });
+        } else if (skipped > 0) {
+            return { error: `Nada importado. ${skipped} itens já existiam.` };
+        }
 
+    } catch(e) { return { error: "Erro na importação" }; }
+
+    revalidatePath('/dashboard/transactions'); 
+    revalidatePath('/dashboard/accounts');
     revalidatePath('/dashboard');
     return { success: true };
 }
@@ -455,6 +392,7 @@ export async function getRecurringTransactions() {
   }));
 }
 
+// --- NOVA FUNÇÃO: PRÓXIMOS VENCIMENTOS ---
 export async function getUpcomingBills() {
   const { user, error } = await validateUser();
   if (error || !user) return [];
@@ -479,6 +417,7 @@ export async function getUpcomingBills() {
     const currentMonth = today.getMonth();
     let dueDate = new Date(currentYear, currentMonth, card.dueDay);
     
+    // IMPORTANTE: Usa differenceInDays para calcular se a fatura já virou
     if (differenceInDays(today, dueDate) > 20) { dueDate = addMonths(dueDate, 1); }
     
     const total = card.transactions.reduce((acc, t) => acc + Number(t.amount), 0);
