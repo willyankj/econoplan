@@ -5,6 +5,20 @@ import { revalidatePath } from "next/cache";
 import { createAuditLog } from "@/lib/audit";
 import { validateUser, getActiveWorkspaceId } from "@/lib/action-utils";
 import { notifyInvoiceDue } from "@/lib/notifications"; 
+import { z } from "zod";
+
+const BudgetSchema = z.object({
+    amount: z.coerce.number().min(0, "Valor inválido"),
+    categoryId: z.string().optional()
+});
+
+const GoalSchema = z.object({
+    name: z.string().min(1, "Nome obrigatório"),
+    targetAmount: z.coerce.number().min(0),
+    deadline: z.string().optional().nullable(),
+    currentAmount: z.coerce.number().optional(),
+    contributionRules: z.string().optional() // JSON string
+});
 
 // === ORÇAMENTOS ===
 export async function upsertBudget(formData: FormData, id?: string) {
@@ -12,9 +26,10 @@ export async function upsertBudget(formData: FormData, id?: string) {
   const { user, error } = await validateUser(permission);
   if (error || !user) return { error };
 
-  const rawAmount = formData.get("amount") as string;
-  const amount = rawAmount ? parseFloat(rawAmount) : 0;
-  const categoryId = formData.get("categoryId") as string;
+  const parsed = BudgetSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: "Dados inválidos" };
+
+  const { amount, categoryId } = parsed.data;
 
   if (id) {
     await prisma.budget.update({ where: { id }, data: { targetAmount: amount } });
@@ -22,6 +37,7 @@ export async function upsertBudget(formData: FormData, id?: string) {
   } else {
     const workspaceId = await getActiveWorkspaceId(user);
     if (!workspaceId) return { error: "Sem workspace" };
+    if (!categoryId) return { error: "Categoria necessária" };
     
     const budget = await prisma.budget.create({ data: { name: "Orçamento", targetAmount: amount, workspaceId, categoryId } });
     
@@ -50,35 +66,30 @@ export async function upsertGoal(formData: FormData, id?: string, isShared = fal
   const { user, error } = await validateUser(isShared ? 'org_view' : undefined);
   if (error || !user) return { error };
 
-  const rawTarget = formData.get("targetAmount") as string;
-  const targetAmount = rawTarget ? parseFloat(rawTarget) : 0;
+  const parsed = GoalSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: "Dados inválidos" };
+  
+  const { name, targetAmount, deadline, currentAmount, contributionRules: rulesString } = parsed.data;
 
-  // Captura as regras de contribuição (Se vierem como JSON string do form)
-  const rulesString = formData.get("contributionRules") as string;
   let contributionRules = null;
   if (rulesString) {
-      try {
-          contributionRules = JSON.parse(rulesString);
-      } catch (e) { console.log("Erro ao parsear regras", e) }
+      try { contributionRules = JSON.parse(rulesString); } catch (e) {}
   }
 
   const data = {
-    name: formData.get("name") as string,
-    targetAmount: isNaN(targetAmount) ? 0 : targetAmount,
-    deadline: formData.get("deadline") ? new Date(formData.get("deadline") as string) : null,
-    contributionRules: contributionRules ?? undefined // Adicionado
+    name,
+    targetAmount,
+    deadline: deadline ? new Date(deadline) : null,
+    contributionRules: contributionRules ?? undefined
   };
 
   if (id) {
     await prisma.goal.update({ where: { id }, data });
     await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'UPDATE', entity: 'Goal', entityId: id, details: `Atualizou meta ${data.name}` });
   } else {
-    const rawCurrent = formData.get("currentAmount") as string;
-    const currentAmount = rawCurrent ? parseFloat(rawCurrent) : 0;
-    
     let goalData: any = { 
         ...data, 
-        currentAmount: isNaN(currentAmount) ? 0 : currentAmount 
+        currentAmount: currentAmount || 0 
     };
     
     if (isShared) {
@@ -127,13 +138,12 @@ export async function moveMoneyGoal(goalId: string, amount: number, accountId: s
     const txType = isDeposit ? "EXPENSE" : "INCOME";
     const categoryName = isDeposit ? "Investimentos" : "Resgate Investimento";
 
-    // CORREÇÃO: Usando workspaceId_name_type e incluindo 'type'
     const category = await prisma.category.upsert({ 
         where: { 
             workspaceId_name_type: { 
                 workspaceId: account.workspaceId, 
                 name: categoryName,
-                type: txType // Incluído
+                type: txType 
             } 
         }, 
         update: {}, 
@@ -190,13 +200,11 @@ export async function checkDeadlinesAndSendAlerts() {
     let count = 0;
     
     for (const card of cardsDue) {
-        // Busca todos os usuários do tenant dono do cartão
         const users = await prisma.user.findMany({ 
             where: { tenantId: card.workspace.tenantId } 
         });
 
         for (const u of users) {
-            // USA A FUNÇÃO CENTRALIZADA
             await notifyInvoiceDue(u.id, card.name, alertDay);
             count++;
         }

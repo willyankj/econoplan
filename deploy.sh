@@ -15,14 +15,13 @@ git pull
 echo "📦 2. Verificando dependências..."
 npm install
 
-# 3. Atualizar o Banco de Dados e o Cliente Prisma
-# MUDANÇA AQUI: 'db push' garante que o banco esteja igual ao schema.prisma
-echo "🗄️  3. Sincronizando Banco de Dados e Gerando Cliente..."
+# 3. Atualizar o Banco de Dados
+echo "🗄️  3. Sincronizando Banco de Dados..."
 npx prisma db push
 
-# 4. Criar a versão de produção do Next.js
+# 4. Criar a versão de produção (COM OTIMIZAÇÃO DE MEMÓRIA)
 echo "🏗️  4. Construindo a aplicação (Build)..."
-npm run build
+NODE_OPTIONS="--max-old-space-size=2048" npm run build
 
 # 5. Reiniciar o servidor no PM2
 echo "🔄 5. Reiniciando o processo 'econoplan'..."

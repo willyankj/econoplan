@@ -4,7 +4,7 @@ import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, X, Check } from "lucide-react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { format, startOfMonth, endOfMonth, addMonths, subMonths, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -72,18 +72,17 @@ export function DateMonthSelector({ prefix = "", keysToReset = [], className, is
 
   const handleRangeSelect = (range: DateRange | undefined) => {
     setDateRange(range);
-    if (range?.from) {
+  };
+
+  const applyFilter = () => {
+    if (dateRange?.from && dateRange?.to) {
       const params = new URLSearchParams(searchParams.toString());
-      if (range.to) {
-        params.set(keyFrom, format(range.from, 'yyyy-MM-dd'));
-        params.set(keyTo, format(range.to, 'yyyy-MM-dd'));
-        params.delete(keyMonth);
-        clearKeys(params);
-        router.push(`${pathname}?${params.toString()}`);
-        setOpen(false);
-      } else {
-        params.delete(keyMonth); 
-      }
+      params.set(keyFrom, format(dateRange.from, 'yyyy-MM-dd'));
+      params.set(keyTo, format(dateRange.to, 'yyyy-MM-dd'));
+      params.delete(keyMonth);
+      clearKeys(params);
+      router.push(`${pathname}?${params.toString()}`);
+      setOpen(false);
     }
   };
 
@@ -95,11 +94,64 @@ export function DateMonthSelector({ prefix = "", keysToReset = [], className, is
       params.delete(keyMonth);
       router.push(`${pathname}?${params.toString()}`);
       setDateRange(undefined);
+      if(isIconTrigger) setOpen(false);
   };
 
   const isActive = !!(paramFrom && paramTo) || !!paramMonth;
   
-  // MODO ÍCONE PURO (Para filtros específicos de card)
+  // --- CONTEÚDO DO POPOVER ---
+  const PopoverContentInternal = () => (
+    <div className="flex flex-col w-full">
+        {isIconTrigger && (
+            <div className="p-3 border-b border-border flex justify-between items-center bg-muted/30 w-full">
+                <span className="text-xs font-medium text-muted-foreground">Período do Gráfico</span>
+                {isActive && (
+                    <button onClick={handleClear} className="text-xs text-rose-500 hover:underline">
+                        Limpar
+                    </button>
+                )}
+            </div>
+        )}
+        
+        {/* Container do calendário centralizado */}
+        <div className="p-3 flex justify-center w-full">
+            <Calendar
+                initialFocus
+                mode="range"
+                defaultMonth={dateRef}
+                selected={dateRange}
+                onSelect={handleRangeSelect}
+                numberOfMonths={1}
+                locale={ptBR}
+                fixedWeeks
+                className="rounded-md border shadow-sm bg-background"
+            />
+        </div>
+
+        <div className="p-2 border-t border-border bg-muted/10 flex justify-between items-center w-full">
+             <span className="text-[10px] text-muted-foreground pl-2 truncate max-w-[120px]" title={dateRange?.from ? "Período selecionado" : "Selecione"}>
+                {dateRange?.from ? (
+                    dateRange.to ? 
+                    `${format(dateRange.from, 'dd/MM')} - ${format(dateRange.to, 'dd/MM')}` : 
+                    `${format(dateRange.from, 'dd/MM')} - ...`
+                ) : "Selecione"}
+             </span>
+             <div className="flex gap-2 shrink-0">
+                <Button size="sm" variant="ghost" onClick={() => setOpen(false)} className="h-7 text-xs px-2">Cancelar</Button>
+                <Button 
+                    size="sm" 
+                    onClick={applyFilter} 
+                    disabled={!dateRange?.from || !dateRange?.to}
+                    className="h-7 text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-2"
+                >
+                    <Check className="w-3 h-3 mr-1" /> Aplicar
+                </Button>
+             </div>
+        </div>
+    </div>
+  );
+
+  // MODO ÍCONE PURO
   if (isIconTrigger) {
       return (
         <Popover open={open} onOpenChange={setOpen}>
@@ -115,31 +167,15 @@ export function DateMonthSelector({ prefix = "", keysToReset = [], className, is
                     <CalendarIcon className="w-4 h-4" />
                 </button>
             </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="start">
-                <div className="p-3 border-b border-border flex justify-between items-center bg-muted/30">
-                    <span className="text-xs font-medium text-muted-foreground">Período do Gráfico</span>
-                    {isActive && (
-                        <button onClick={handleClear} className="text-xs text-rose-500 hover:underline">
-                            Limpar Filtro
-                        </button>
-                    )}
-                </div>
-                <Calendar
-                    initialFocus
-                    mode="range"
-                    defaultMonth={dateRef}
-                    selected={dateRange}
-                    onSelect={handleRangeSelect}
-                    numberOfMonths={1}
-                    locale={ptBR}
-                    className="p-3"
-                />
+            {/* CORREÇÃO: Largura fixa e alinhamento */}
+            <PopoverContent className="w-[320px] p-0" align="start">
+                <PopoverContentInternal />
             </PopoverContent>
         </Popover>
       );
   }
 
-  // MODO PADRÃO (Cabeçalho)
+  // MODO PADRÃO
   let label = "";
   if (paramFrom && paramTo) {
     label = `${format(parseISO(paramFrom), "dd MMM", { locale: ptBR })} - ${format(parseISO(paramTo), "dd MMM", { locale: ptBR })}`;
@@ -174,17 +210,10 @@ export function DateMonthSelector({ prefix = "", keysToReset = [], className, is
             )}
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-auto p-0" align="end">
-          <Calendar
-            initialFocus
-            mode="range"
-            defaultMonth={dateRef}
-            selected={dateRange}
-            onSelect={handleRangeSelect}
-            numberOfMonths={1}
-            locale={ptBR}
-            className="p-3"
-          />
+        
+        {/* CORREÇÃO: Largura fixa e alinhamento */}
+        <PopoverContent className="w-[320px] p-0" align="end">
+            <PopoverContentInternal />
         </PopoverContent>
       </Popover>
 

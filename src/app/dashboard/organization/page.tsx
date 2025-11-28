@@ -2,7 +2,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"; // Incluído CardDescription
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"; 
 import { Building2, TrendingUp, TrendingDown, Target, PieChart, DollarSign } from "lucide-react";
 import { GoalModal } from "@/components/dashboard/goals/goal-modal";
 import { DepositGoalModal } from "@/components/dashboard/goals/deposit-goal-modal";
@@ -14,13 +14,12 @@ import { OrgFilters } from "@/components/dashboard/organization/org-filters";
 import { GoalAnalytics } from "@/components/dashboard/organization/goal-analytics"; 
 import { formatCurrency } from "@/lib/utils";
 import { InfoHelp } from "@/components/dashboard/info-help"; 
-
-// ANALYTICS
 import { getTenantOracleData, getTenantDebtXRayData, getTenantHealthScore } from "@/app/dashboard/actions/analytics";
 import { FinancialOracle } from "@/components/dashboard/analytics/financial-oracle";
 import { DebtXRay } from "@/components/dashboard/analytics/debt-xray";
 import { HealthScore } from "@/components/dashboard/analytics/health-score";
-import { Progress } from "@/components/ui/progress"; 
+
+const toDecimal = (val: any) => Number(val) || 0;
 
 export default async function OrganizationPage({
   searchParams
@@ -37,76 +36,96 @@ export default async function OrganizationPage({
   const tenantId = user.tenantId;
   const params = await searchParams;
 
-  // Lógica de Datas (Resumida)
   const now = new Date();
   let startDate, endDate;
-  if (params.from && params.to) { startDate = new Date(params.from+"T00:00:00"); endDate = new Date(params.to+"T23:59:59"); }
-  else { 
-      let d = now; if(params.month) { const [y,m] = params.month.split('-'); d = new Date(parseInt(y), parseInt(m)-1, 1); }
-      startDate = new Date(d.getFullYear(), d.getMonth(), 1); endDate = new Date(d.getFullYear(), d.getMonth()+1, 0, 23,59,59);
+  if (params.from && params.to) { 
+      startDate = new Date(params.from+"T00:00:00"); 
+      endDate = new Date(params.to+"T23:59:59"); 
+  } else { 
+      let d = now; 
+      if(params.month) { const [y,m] = params.month.split('-'); d = new Date(parseInt(y), parseInt(m)-1, 1); }
+      startDate = new Date(d.getFullYear(), d.getMonth(), 1); 
+      endDate = new Date(d.getFullYear(), d.getMonth()+1, 0, 23,59,59);
   }
 
-  // Identifica o ID do Workspace filtrado (ou undefined se for 'ALL')
   const filterWorkspaceId = params.filterWorkspace && params.filterWorkspace !== 'ALL' ? params.filterWorkspace : undefined;
   const filterType = params.filterType && params.filterType !== 'ALL' ? params.filterType : undefined;
 
-  // --- CORREÇÃO AQUI: Passando o filtro para as funções ---
-  const oracleData = await getTenantOracleData(6, filterWorkspaceId);
-  const debtData = await getTenantDebtXRayData(filterWorkspaceId);
-  const healthData = await getTenantHealthScore(filterWorkspaceId);
-  // --------------------------------------------------------
+  // --- FILTROS DE QUERY ---
+  const baseWhere = {
+      tenantId,
+      ...(filterWorkspaceId && { id: filterWorkspaceId })
+  };
+  
+  const txWhere = {
+      workspace: { tenantId, ...(filterWorkspaceId && { id: filterWorkspaceId }) },
+      date: { gte: startDate, lte: endDate },
+      ...(filterType && { type: filterType as any })
+  };
 
-  const workspaces = await prisma.workspace.findMany({
-    where: { 
-        tenantId, 
-        ...(filterWorkspaceId && { id: filterWorkspaceId }) // Filtro aplicado na busca de workspaces
-    },
-    include: { 
-        bankAccounts: true, 
-        transactions: { 
-            where: { 
-                date: { gte: startDate, lte: endDate }, 
-                ...(filterType && { type: filterType as any }) 
-            }, 
-            include: { category: true } 
-        } 
-    }
+  // 1. KPIS (Agregados no Banco - Leve)
+  const accounts = await prisma.bankAccount.findMany({ where: { workspace: baseWhere } });
+  const totalBalance = accounts.reduce((acc, a) => acc + toDecimal(a.balance), 0);
+
+  const incomeAgg = await prisma.transaction.aggregate({ _sum: { amount: true }, where: { ...txWhere, type: 'INCOME', creditCardId: null } });
+  const expenseAgg = await prisma.transaction.aggregate({ _sum: { amount: true }, where: { ...txWhere, type: 'EXPENSE', creditCardId: null } });
+  
+  const totalIncome = toDecimal(incomeAgg._sum.amount);
+  const totalExpense = toDecimal(expenseAgg._sum.amount);
+
+  // 2. DADOS PARA GRÁFICOS (Agregados por Grupo)
+  const workspacesList = await prisma.workspace.findMany({ where: { tenantId }, select: { id: true, name: true } });
+  const workspaceMap = new Map(workspacesList.map(w => [w.id, w.name]));
+
+  const byWorkspace = await prisma.transaction.groupBy({
+      by: ['workspaceId', 'type'],
+      _sum: { amount: true },
+      where: { ...txWhere, creditCardId: null }
   });
 
-  const allWorkspaces = await prisma.workspace.findMany({ where: { tenantId }, select: { id: true, name: true } });
+  const workspaceChartData: any[] = [];
+  // Processa o agrupamento para formato do gráfico
+  const wsDataMap = new Map();
+  byWorkspace.forEach(item => {
+      const wsName = workspaceMap.get(item.workspaceId) || 'Unknown';
+      if (!wsDataMap.has(wsName)) wsDataMap.set(wsName, { name: wsName, income: 0, expense: 0 });
+      const val = toDecimal(item._sum.amount);
+      if (item.type === 'INCOME') wsDataMap.get(wsName).income += val;
+      else wsDataMap.get(wsName).expense += val;
+  });
+  workspaceChartData.push(...Array.from(wsDataMap.values()));
+
+  // Categorias (Top 5)
+  const byCategory = await prisma.transaction.groupBy({
+      by: ['categoryId'],
+      _sum: { amount: true },
+      where: { ...txWhere, type: 'EXPENSE', creditCardId: null, categoryId: { not: null } },
+      orderBy: { _sum: { amount: 'desc' } },
+      take: 5
+  });
+
+  // Busca nomes das categorias (apenas as 5 usadas)
+  const catIds = byCategory.map(c => c.categoryId).filter(Boolean) as string[];
+  const categories = await prisma.category.findMany({ where: { id: { in: catIds } }, select: { id: true, name: true } });
+  const catNameMap = new Map(categories.map(c => [c.id, c.name]));
+
+  const categoryChartData = byCategory.map(c => ({
+      name: catNameMap.get(c.categoryId!) || 'Outros',
+      value: toDecimal(c._sum.amount)
+  }));
+
+  // 3. WIDGETS E LISTAS
+  const oracleData = await getTenantOracleData(filterWorkspaceId, { from: startDate, to: endDate });
+  const debtData = await getTenantDebtXRayData(filterWorkspaceId);
+  const healthData = await getTenantHealthScore(filterWorkspaceId);
 
   const recentTransactions = await prisma.transaction.findMany({
-    where: { 
-        workspace: { 
-            tenantId, 
-            ...(filterWorkspaceId && { id: filterWorkspaceId }) // Filtro aplicado nas transações recentes
-        }, 
-        date: { gte: startDate, lte: endDate }, 
-        ...(filterType && { type: filterType as any }) 
-    },
+    where: txWhere,
     orderBy: { date: 'desc' }, 
     take: 20, 
     include: { workspace: true, category: true }
   });
 
-  // AGREGAR TOTAIS
-  let totalBalance = 0, totalIncome = 0, totalExpense = 0;
-  const workspaceChartData: any[] = [];
-  const categoryMap = new Map<string, number>();
-
-  workspaces.forEach(ws => {
-    let wsB = 0; ws.bankAccounts.forEach(a => wsB += Number(a.balance)); totalBalance += wsB;
-    let wsI = 0, wsE = 0;
-    ws.transactions.forEach(t => {
-      const v = Number(t.amount);
-      if (t.type === 'INCOME' && !t.creditCardId) { totalIncome += v; wsI += v; }
-      if (t.type === 'EXPENSE' && !t.creditCardId) { totalExpense += v; wsE += v; if(t.category) categoryMap.set(t.category.name, (categoryMap.get(t.category.name)||0)+v); }
-    });
-    workspaceChartData.push({ name: ws.name, income: wsI, expense: wsE });
-  });
-  const categoryChartData = Array.from(categoryMap.entries()).map(([name, value]) => ({ name, value }));
-
-  // METAS
   const sharedGoals = await prisma.goal.findMany({ where: { tenantId }, include: { transactions: true }, orderBy: { createdAt: 'desc' } });
   const goalsWithDetails = sharedGoals.map(g => ({ ...g, targetAmount: Number(g.targetAmount), currentAmount: Number(g.currentAmount), transactions: g.transactions.map(t => ({...t, amount: Number(t.amount)})) }));
   
@@ -129,11 +148,11 @@ export default async function OrganizationPage({
         </div>
         <div className="flex items-center gap-2 w-full md:w-auto">
             <DateMonthSelector />
-            <OrgFilters workspaces={allWorkspaces} />
+            <OrgFilters workspaces={workspacesList} />
         </div>
       </div>
 
-      {/* 1. KPIS (AGORA NO TOPO) */}
+      {/* 1. KPIS */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card className="bg-card border-border shadow-sm">
             <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
@@ -190,7 +209,7 @@ export default async function OrganizationPage({
         </Card>
       </div>
 
-      {/* 2. INTELIGÊNCIA (SAÚDE + ORÁCULO) */}
+      {/* 2. INTELIGÊNCIA */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-1">
               <HealthScore score={healthData.score} metrics={healthData.metrics} />
@@ -200,7 +219,7 @@ export default async function OrganizationPage({
           </div>
       </div>
 
-      {/* 3. DETALHAMENTO (RAIO-X + FLUXO) */}
+      {/* 3. DETALHAMENTO */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
            <DebtXRay data={debtData.chartData} cardNames={debtData.cardNames} />
            <TenantOverviewCharts workspaceData={workspaceChartData} categoryData={categoryChartData} />
@@ -219,7 +238,7 @@ export default async function OrganizationPage({
                 </h3>
                 <p className="text-sm text-muted-foreground">Acompanhamento detalhado de contribuições.</p>
             </div>
-            <GoalModal isShared={true} workspaces={allWorkspaces} />
+            <GoalModal isShared={true} workspaces={workspacesList} />
         </div>
 
         {goalsWithDetails.length === 0 ? (
@@ -238,7 +257,7 @@ export default async function OrganizationPage({
                                     <CardDescription>Meta Global: {formatCurrency(goal.targetAmount)}</CardDescription>
                                 </div>
                                 <div className="flex gap-2">
-                                    <GoalModal goal={goal} isShared={true} workspaces={allWorkspaces} />
+                                    <GoalModal goal={goal} isShared={true} workspaces={workspacesList} />
                                     <DepositGoalModal 
                                         goal={goal} 
                                         accounts={allUserAccounts} 
@@ -248,7 +267,7 @@ export default async function OrganizationPage({
                             </div>
                         </CardHeader>
                         <CardContent className="p-6 flex-1">
-                            <GoalAnalytics goal={goal} workspaces={allWorkspaces} />
+                            <GoalAnalytics goal={goal} workspaces={workspacesList} />
                         </CardContent>
                     </Card>
                 ))}

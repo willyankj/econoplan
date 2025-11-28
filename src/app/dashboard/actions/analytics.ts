@@ -2,7 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { validateUser, getActiveWorkspaceId } from "@/lib/action-utils";
-import { addMonths, startOfMonth, endOfMonth, format, subMonths } from "date-fns";
+import { addMonths, startOfMonth, endOfMonth, format, subMonths, differenceInCalendarMonths, isAfter, isBefore } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
 const toDecimal = (num: any) => Number(num) || 0;
@@ -10,33 +10,35 @@ const toDecimal = (num: any) => Number(num) || 0;
 // ============================================================================
 // 1. ORÁCULO FINANCEIRO (Tenant ou Workspace Específico)
 // ============================================================================
-export async function getTenantOracleData(monthsToProject = 6, filterWorkspaceId?: string) {
+export async function getTenantOracleData(filterWorkspaceId?: string, dateRange?: { from: Date, to: Date }) {
   const { user } = await validateUser('org_view');
   if (!user) return { balanceData: [] };
 
   const today = new Date();
-  const endDate = addMonths(today, monthsToProject);
+  
+  let projectUntil = dateRange?.to ? new Date(dateRange.to) : addMonths(today, 6);
+  if (isBefore(projectUntil, today)) {
+      projectUntil = addMonths(today, 1);
+  }
 
-  // Filtro dinâmico: Se tiver ID, filtra pelo ID. Se não, pega todos do Tenant.
+  const monthsToProject = Math.max(1, differenceInCalendarMonths(projectUntil, today));
+
   const workspaceFilter = filterWorkspaceId 
     ? { id: filterWorkspaceId, tenantId: user.tenantId }
     : { tenantId: user.tenantId };
 
-  // 1. Saldo Atual
   const accounts = await prisma.bankAccount.findMany({
     where: { workspace: workspaceFilter }
   });
   let currentBalance = accounts.reduce((acc, cur) => acc + toDecimal(cur.balance), 0);
 
-  // 2. Transações Futuras
   const futureTransactions = await prisma.transaction.findMany({
     where: {
       workspace: workspaceFilter,
-      date: { gt: today, lte: endDate }
+      date: { gt: today, lte: projectUntil }
     }
   });
 
-  // 3. Recorrências
   const recurringTransactions = await prisma.transaction.findMany({
     where: {
       workspace: workspaceFilter,
@@ -53,12 +55,10 @@ export async function getTenantOracleData(monthsToProject = 6, filterWorkspaceId
     const monthEnd = endOfMonth(currentDate);
     const monthLabel = format(currentDate, 'MMM', { locale: ptBR }).toUpperCase();
 
-    // A. Real
     const monthRealTx = futureTransactions.filter(t => t.date >= monthStart && t.date <= monthEnd);
     const incomeReal = monthRealTx.filter(t => t.type === 'INCOME').reduce((sum, t) => sum + toDecimal(t.amount), 0);
     const expenseReal = monthRealTx.filter(t => t.type === 'EXPENSE').reduce((sum, t) => sum + toDecimal(t.amount), 0);
 
-    // B. Projetado
     let incomeProjected = 0;
     let expenseProjected = 0;
 
@@ -74,6 +74,7 @@ export async function getTenantOracleData(monthsToProject = 6, filterWorkspaceId
 
     timeline.push({
         name: monthLabel,
+        dateRef: monthStart, 
         balance: runningBalance,
         income: incomeReal + incomeProjected,
         expense: expenseReal + expenseProjected,
@@ -81,29 +82,38 @@ export async function getTenantOracleData(monthsToProject = 6, filterWorkspaceId
     });
   }
 
-  return { balanceData: timeline };
+  const filteredData = timeline.filter(item => {
+      if (!dateRange) return true; 
+      return item.dateRef >= startOfMonth(dateRange.from) && item.dateRef <= endOfMonth(dateRange.to);
+  });
+
+  return { balanceData: filteredData };
 }
 
 // ============================================================================
-// 2. RAIO-X DE ENDIVIDAMENTO
+// 2. RAIO-X DE ENDIVIDAMENTO (Faturas Futuras Reais)
 // ============================================================================
 export async function getTenantDebtXRayData(filterWorkspaceId?: string) {
   const { user } = await validateUser('org_view');
   if (!user) return { chartData: [], cardNames: [] };
 
   const today = new Date();
-  const endDate = addMonths(today, 11); 
+  // Busca transações futuras o suficiente para cobrir parcelamentos longos (18 meses)
+  const searchEnd = addMonths(today, 18); 
 
   const workspaceFilter = filterWorkspaceId 
     ? { id: filterWorkspaceId, tenantId: user.tenantId }
     : { tenantId: user.tenantId };
 
+  // 1. Busca apenas o que NÃO FOI PAGO (isPaid: false)
+  // Isso garante que quando você paga a fatura, o gasto some daqui.
   const cardTransactions = await prisma.transaction.findMany({
     where: {
       workspace: workspaceFilter,
       type: 'EXPENSE',
       creditCardId: { not: null },
-      date: { gte: startOfMonth(today), lte: endDate }
+      isPaid: false, 
+      date: { lte: searchEnd } // Pega tudo até o fim da busca
     },
     include: { creditCard: true }
   });
@@ -111,6 +121,7 @@ export async function getTenantDebtXRayData(filterWorkspaceId?: string) {
   const monthsMap = new Map<string, any>();
   const cardSet = new Set<string>();
 
+  // Inicializa os próximos 12 meses no gráfico (Visualização)
   for (let i = 0; i < 12; i++) {
       const d = addMonths(today, i);
       const key = format(d, 'MMM/yy', { locale: ptBR }).toUpperCase();
@@ -118,10 +129,36 @@ export async function getTenantDebtXRayData(filterWorkspaceId?: string) {
   }
 
   cardTransactions.forEach(t => {
-      const key = format(t.date, 'MMM/yy', { locale: ptBR }).toUpperCase();
-      const cardName = t.creditCard?.name || 'Outros';
+      if (!t.creditCard) return;
+
+      const txDate = new Date(t.date);
+      const closingDay = t.creditCard.closingDay;
+      const dueDay = t.creditCard.dueDay;
+
+      // Lógica de Ciclo do Cartão:
+      // 1. Define a data de fechamento no mês da compra
+      let referenceClosingDate = new Date(txDate.getFullYear(), txDate.getMonth(), closingDay);
+      
+      // 2. Se a compra foi DEPOIS do fechamento (ou no dia), joga para a próxima fatura
+      if (txDate.getDate() >= closingDay) {
+          referenceClosingDate = addMonths(referenceClosingDate, 1);
+      }
+
+      // 3. A data de vencimento é baseada no mês dessa fatura de referência
+      let dueDate = new Date(referenceClosingDate.getFullYear(), referenceClosingDate.getMonth(), dueDay);
+      
+      // Ajuste fino: Se o dia de vencimento for antes do fechamento (ex: fecha dia 25, vence dia 5),
+      // o vencimento é no mês seguinte ao fechamento.
+      if (dueDate <= referenceClosingDate) {
+          dueDate = addMonths(dueDate, 1);
+      }
+
+      // Agora agrupamos pela DATA DE VENCIMENTO CALCULADA, não pela data da compra
+      const key = format(dueDate, 'MMM/yy', { locale: ptBR }).toUpperCase();
+      const cardName = t.creditCard.name;
       cardSet.add(cardName);
 
+      // Só adiciona se estiver dentro do intervalo de visualização (12 meses)
       if (monthsMap.has(key)) {
           const entry = monthsMap.get(key);
           entry[cardName] = (entry[cardName] || 0) + toDecimal(t.amount);
@@ -136,7 +173,7 @@ export async function getTenantDebtXRayData(filterWorkspaceId?: string) {
 }
 
 // ============================================================================
-// 3. COMPARATIVO MÊS A MÊS (Workspace Local)
+// 3. COMPARATIVO MÊS A MÊS
 // ============================================================================
 export async function getWorkspaceCategoryComparison() {
     const { user } = await validateUser();
@@ -238,7 +275,6 @@ export async function getTenantHealthScore(filterWorkspaceId?: string) {
     if (coverageMonths >= 3) coverageScore = 40;
     else coverageScore = (coverageMonths / 3) * 40;
 
-    // 3. Aderência ao Orçamento (Peso 20)
     let budgetScore = 20;
     if (savingsRate < 0 || totalIncome === 0) budgetScore = 0;
 

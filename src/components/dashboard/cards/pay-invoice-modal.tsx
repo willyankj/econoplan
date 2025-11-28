@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { CheckCircle2, Loader2 } from "lucide-react";
 import { payCreditCardInvoice } from '@/app/dashboard/actions';
 import { BankLogo } from "@/components/ui/bank-logo";
+import { toast } from "sonner"; // <--- ADICIONADO
 
 interface PayInvoiceProps {
   cardId: string;
@@ -27,13 +28,19 @@ export function PayInvoiceModal({ cardId, cardName, currentInvoice, accounts }: 
     const formData = new FormData(event.currentTarget);
     formData.append('cardId', cardId);
     
-    await payCreditCardInvoice(formData);
+    const result = await payCreditCardInvoice(formData);
     
     setIsLoading(false);
-    setOpen(false);
+
+    // --- LÓGICA DE FEEDBACK ADICIONADA ---
+    if (result?.error) {
+        toast.error("Erro no pagamento", { description: result.error });
+    } else {
+        toast.success("Fatura paga com sucesso!");
+        setOpen(false);
+    }
   }
 
-  // Se a fatura for zero ou negativa, desabilita o botão
   const isInvoiceZero = currentInvoice <= 0;
 
   return (
@@ -63,7 +70,6 @@ export function PayInvoiceModal({ cardId, cardName, currentInvoice, accounts }: 
             </p>
           </div>
 
-          {/* AQUI ESTÁ O SELETOR QUE VOCÊ PERGUNTOU */}
           <div className="grid gap-2">
             <Label htmlFor="accountId">Pagar com a conta</Label>
             <Select name="accountId" required>

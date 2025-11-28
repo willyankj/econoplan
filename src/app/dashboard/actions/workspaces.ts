@@ -6,6 +6,21 @@ import { cookies } from 'next/headers';
 import { createAuditLog } from "@/lib/audit";
 import { validateUser } from "@/lib/action-utils";
 import { notifyUserInvited } from "@/lib/notifications";
+import { z } from "zod";
+
+const WorkspaceSchema = z.object({
+    name: z.string().min(1, "Nome do workspace é obrigatório")
+});
+
+const InviteSchema = z.object({
+    email: z.string().email("E-mail inválido"),
+    role: z.enum(["ADMIN", "MEMBER"]),
+    workspaceId: z.string().uuid()
+});
+
+const RoleUpdateSchema = z.object({
+    role: z.string().min(1)
+});
 
 export async function switchWorkspace(workspaceId: string) {
   const cookieStore = await cookies();
@@ -17,7 +32,10 @@ export async function createWorkspace(formData: FormData) {
   const { user, error } = await validateUser('org_manage_workspaces');
   if (error || !user) return { error };
 
-  const name = formData.get("name") as string;
+  const parsed = WorkspaceSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: "Nome inválido" };
+
+  const name = parsed.data.name;
   const ws = await prisma.workspace.create({
     data: { name, tenantId: user.tenantId, members: { create: { userId: user.id, role: 'ADMIN' } } }
   });
@@ -31,7 +49,10 @@ export async function updateWorkspaceName(workspaceId: string, formData: FormDat
   const { user, error } = await validateUser('org_manage_workspaces');
   if (error || !user) return { error };
 
-  const name = formData.get("name") as string;
+  const parsed = WorkspaceSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: "Nome inválido" };
+
+  const name = parsed.data.name;
   await prisma.workspace.update({ where: { id: workspaceId }, data: { name } });
 
   await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'UPDATE', entity: 'Workspace', entityId: workspaceId, details: `Renomeou workspace para "${name}"` });
@@ -67,15 +88,14 @@ export async function deleteWorkspace(workspaceId: string) {
   return { success: true };
 }
 
-// --- Membros e Convites ---
-
 export async function inviteMember(formData: FormData) {
   const { user: currentUser, error } = await validateUser('org_invite');
   if (error || !currentUser) return { error };
 
-  const email = formData.get("email") as string;
-  const role = formData.get("role") as "ADMIN" | "MEMBER";
-  const workspaceId = formData.get("workspaceId") as string;
+  const parsed = InviteSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: "Dados de convite inválidos" };
+
+  const { email, role, workspaceId } = parsed.data;
 
   const targetWorkspace = await prisma.workspace.findUnique({ where: { id: workspaceId } });
   if (!targetWorkspace) return { error: "Workspace inválido." };
@@ -88,18 +108,18 @@ export async function inviteMember(formData: FormData) {
     await prisma.user.update({
       where: { email },
       data: { 
-        tenantId: currentUser.tenantId, role: role, 
+        tenantId: currentUser.tenantId, role: role as any, 
         workspaces: { connectOrCreate: { where: { userId_workspaceId: { userId: existingUser.id, workspaceId } }, create: { workspaceId, role: 'MEMBER' } } }
       }
     });
   } else {
     const newUser = await prisma.user.create({
-      data: { email, tenantId: currentUser.tenantId, role, name: "Convidado", workspaces: { create: { workspaceId, role: 'MEMBER' } } }
+      data: { email, tenantId: currentUser.tenantId, role: role as any, name: "Convidado", workspaces: { create: { workspaceId, role: 'MEMBER' } } }
     });
     targetUserId = newUser.id;
   }
 
-await notifyUserInvited(targetUserId, targetWorkspace.name);
+  await notifyUserInvited(targetUserId, targetWorkspace.name);
   
   await createAuditLog({ 
       tenantId: currentUser.tenantId, 
@@ -129,7 +149,10 @@ export async function updateMemberRole(userId: string, formData: FormData) {
   const { user, error } = await validateUser('org_invite');
   if (error || !user) return { error };
 
-  const newRole = formData.get("role") as string;
+  const parsed = RoleUpdateSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: "Cargo inválido" };
+
+  const newRole = parsed.data.role;
   const targetUser = await prisma.user.findUnique({ where: { id: userId } });
   
   await prisma.user.update({ where: { id: userId }, data: { role: newRole as any } });
@@ -167,10 +190,13 @@ export async function toggleWorkspaceAccess(userId: string, workspaceId: string,
 }
 
 export async function updateTenantName(formData: FormData) {
-    const { user, error } = await validateUser('org_manage_workspaces'); // Admin/Owner
+    const { user, error } = await validateUser('org_manage_workspaces');
     if (error || !user) return { error };
     
-    const name = formData.get("name") as string;
+    const parsed = WorkspaceSchema.safeParse(Object.fromEntries(formData)); // Reutilizando schema de nome
+    if(!parsed.success) return { error: "Nome inválido" };
+
+    const name = parsed.data.name;
     await prisma.tenant.update({ where: { id: user.tenantId }, data: { name } });
     
     await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'UPDATE', entity: 'Tenant', details: `Renomeou organização para "${name}"` });

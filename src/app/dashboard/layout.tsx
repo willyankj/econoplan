@@ -6,8 +6,6 @@ import { cookies } from 'next/headers';
 
 import { SidebarUI } from '@/components/dashboard/sidebar-ui';
 import { MobileSidebar } from '@/components/dashboard/mobile-sidebar';
-import { TransactionModal } from '@/components/dashboard/transaction-modal';
-
 import { NotificationBell } from "@/components/dashboard/notifications/notification-bell";
 import { getNotifications } from "@/app/dashboard/actions";
 
@@ -41,19 +39,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   const currentWorkspaceId = workspaces.find(w => w.id === activeWorkspaceId) ? activeWorkspaceId : workspaces[0].id;
 
-  // Buscas de dados
-  const rawAccounts = await prisma.bankAccount.findMany({ where: { workspaceId: currentWorkspaceId }, orderBy: { name: 'asc' } });
-  const accounts = rawAccounts.map(acc => ({ ...acc, balance: Number(acc.balance) }));
-
-  const rawCards = await prisma.creditCard.findMany({ where: { workspaceId: currentWorkspaceId }, orderBy: { name: 'asc' } });
-  const cards = rawCards.map(card => ({ ...card, limit: Number(card.limit) }));
-
-  // CORREÇÃO: Busca de categorias adicionada
-  const categories = await prisma.category.findMany({ 
-      where: { workspaceId: currentWorkspaceId }, 
-      orderBy: { name: 'asc' } 
-  });
-
+  // Busca apenas as notificações, removida a busca desnecessária de categorias e contas que não eram usadas aqui
   const notifications = await getNotifications();
 
   return (

@@ -4,9 +4,10 @@ import { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Briefcase, Loader2 } from "lucide-react";
-import { Checkbox } from "@/components/ui/checkbox"; // npx shadcn@latest add checkbox
+import { Checkbox } from "@/components/ui/checkbox"; 
 import { Label } from "@/components/ui/label";
 import { toggleWorkspaceAccess } from '@/app/dashboard/actions';
+import { toast } from "sonner"; // <--- ADICIONADO
 
 interface Workspace {
   id: string;
@@ -16,7 +17,7 @@ interface Workspace {
 interface Props {
   user: { id: string; name: string | null; email: string };
   allWorkspaces: Workspace[];
-  userWorkspaces: string[]; // IDs dos workspaces que o usuário já tem
+  userWorkspaces: string[]; 
 }
 
 export function ManageAccessModal({ user, allWorkspaces, userWorkspaces }: Props) {
@@ -25,8 +26,16 @@ export function ManageAccessModal({ user, allWorkspaces, userWorkspaces }: Props
 
   const handleToggle = async (workspaceId: string, checked: boolean) => {
     setLoadingId(workspaceId);
-    await toggleWorkspaceAccess(user.id, workspaceId, checked);
+    const result = await toggleWorkspaceAccess(user.id, workspaceId, checked);
     setLoadingId(null);
+
+    // --- LÓGICA DE FEEDBACK ADICIONADA ---
+    if (result?.error) {
+        toast.error("Erro ao alterar acesso", { description: result.error });
+    } else {
+        // Mensagem diferente se adicionou ou removeu
+        toast.success(checked ? "Acesso concedido!" : "Acesso removido!");
+    }
   };
 
   return (

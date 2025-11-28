@@ -20,7 +20,7 @@ model Tenant {
   updatedAt          DateTime    @updatedAt
   
   // Soft Delete
-  deletedAt          DateTime?   // <--- NOVO CAMPO
+  deletedAt          DateTime?
 
   subscriptionStatus String      @default("TRIAL") 
   planType           String      @default("FREE")  
@@ -41,7 +41,7 @@ model Workspace {
   color         String?           @default("#000000")
   
   // Soft Delete
-  deletedAt     DateTime?         // <--- NOVO CAMPO
+  deletedAt     DateTime?
 
   tenantId      String
   tenant        Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -175,8 +175,8 @@ model BankAccount {
 model Category {
   id            String          @id @default(uuid())
   name          String
-  icon          String?         @default("Tag") // Nome do ícone (Lucide)
-  color         String?         @default("#94a3b8") // Cor em Hex
+  icon          String?         @default("Tag")
+  color         String?         @default("#94a3b8")
   type          TransactionType
   
   workspaceId   String
@@ -198,46 +198,52 @@ model Category {
 }
 
 model Transaction {
-  id            String          @id @default(uuid())
-  description   String
-  amount        Decimal
-  date          DateTime
-  type          TransactionType
-  isPaid        Boolean         @default(false)
+  id                String          @id @default(uuid())
+  description       String
+  amount            Decimal
+  date              DateTime
+  type              TransactionType
+  isPaid            Boolean         @default(false)
   
-  isRecurring   Boolean         @default(false) // É uma assinatura/conta fixa?
-  frequency     TransactionFrequency @default(NONE) // Mensal, Semanal...
+  isRecurring       Boolean         @default(false)
+  frequency         TransactionFrequency @default(NONE)
   
-  isInstallment Boolean         @default(false) // É parcelado?
-  installmentId String?         // ID único para agrupar as parcelas da mesma compra
-  installmentCurrent Int?       // Parcela atual (1)
-  installmentTotal   Int?       // Total de parcelas (10)
+  isInstallment     Boolean         @default(false)
+  installmentId     String?         
+  installmentCurrent Int?
+  installmentTotal   Int?       
   nextRecurringDate DateTime?
+
+  // --- NOVOS CAMPOS PARA CONTROLE DE IMPORTAÇÃO ---
+  externalId        String?         // ID único do banco (FITID do OFX)
+  importHash        String?         // Hash gerado (Data+Valor+Desc) para CSV
+  // ------------------------------------------------
+
+  workspaceId       String
+  workspace         Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   
-  workspaceId   String
-  workspace     Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  bankAccountId     String?
+  bankAccount       BankAccount?    @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
   
-  bankAccountId String?
-  bankAccount   BankAccount?    @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+  creditCardId      String?
+  creditCard        CreditCard?     @relation(fields: [creditCardId], references: [id], onDelete: Cascade)
   
-  creditCardId  String?
-  creditCard    CreditCard?     @relation(fields: [creditCardId], references: [id], onDelete: Cascade)
+  goalId            String?
+  goal              Goal?           @relation(fields: [goalId], references: [id], onDelete: SetNull)
   
-  goalId        String?
-  goal          Goal?           @relation(fields: [goalId], references: [id], onDelete: SetNull)
+  categoryId        String?
+  category          Category?       @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   
-  categoryId    String?
-  category      Category?       @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
 
   @@index([workspaceId])
   @@index([bankAccountId])
   @@index([categoryId])
   @@index([creditCardId])
   @@index([goalId])
-  @@index([installmentId]) // Importante para buscar todas as parcelas de uma compra
+  @@index([installmentId])
+  @@index([importHash]) 
 }
 
 enum TransactionFrequency {
@@ -298,8 +304,6 @@ model Goal {
   targetAmount  Decimal   
   currentAmount Decimal   @default(0) 
   deadline      DateTime?
-  
-  // Regras de Divisão (JSON): { "workspace_id": 60, "workspace_id_2": 40 }
   contributionRules Json?
   
   workspaceId   String?

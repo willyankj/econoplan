@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { PiggyBank, Loader2 } from "lucide-react";
 import { addMoneyToGoal, withdrawMoneyFromGoal } from '@/app/dashboard/actions';
 import { BankLogo } from "@/components/ui/bank-logo";
+import { toast } from "sonner"; // <--- ADICIONADO
 
 interface DepositModalProps {
   goal: { 
@@ -19,7 +20,7 @@ interface DepositModalProps {
   };
   accounts: (any & { workspaceName?: string })[]; 
   type: 'DEPOSIT' | 'WITHDRAW';
-  disabled?: boolean; // <--- NOVO: Propriedade para desabilitar o botão
+  disabled?: boolean;
 }
 
 export function DepositGoalModal({ goal, accounts, type, disabled = false }: DepositModalProps) {
@@ -33,26 +34,32 @@ export function DepositGoalModal({ goal, accounts, type, disabled = false }: Dep
     setIsLoading(true);
     
     const value = parseFloat(amount);
+    let result;
 
     if (type === 'DEPOSIT') {
-        await addMoneyToGoal(goal.id, value, accountId);
+        result = await addMoneyToGoal(goal.id, value, accountId);
     } else {
-        await withdrawMoneyFromGoal(goal.id, value, accountId);
+        result = await withdrawMoneyFromGoal(goal.id, value, accountId);
     }
     
     setIsLoading(false);
-    setOpen(false);
-    setAmount('');
-    setAccountId('');
+
+    // --- LÓGICA DE FEEDBACK ADICIONADA ---
+    if (result?.error) {
+        toast.error("Erro na operação", { description: result.error });
+    } else {
+        toast.success(type === 'DEPOSIT' ? "Valor guardado com sucesso!" : "Resgate realizado com sucesso!");
+        setOpen(false);
+        setAmount('');
+        setAccountId('');
+    }
   }
 
-  // Certifica-se de que a conta não tem saldo para depósito/resgate
   const isAccountListEmpty = accounts.length === 0;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        {/* Adicionado 'disabled' e ajustada a cor para WITHDRAW */}
         <Button 
             variant="outline" 
             size="sm" 

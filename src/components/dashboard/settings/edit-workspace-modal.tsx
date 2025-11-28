@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Briefcase, Loader2, Pencil } from "lucide-react";
 import { updateWorkspaceName } from '@/app/dashboard/actions';
+import { toast } from "sonner"; // <--- ADICIONADO
 
 interface EditWorkspaceModalProps {
   workspace: {
@@ -24,11 +25,17 @@ export function EditWorkspaceModal({ workspace }: EditWorkspaceModalProps) {
     setIsLoading(true);
     const formData = new FormData(event.currentTarget);
     
-    // Chama a Server Action passando o ID do workspace específico
-    await updateWorkspaceName(workspace.id, formData);
+    const result = await updateWorkspaceName(workspace.id, formData);
     
     setIsLoading(false);
-    setOpen(false);
+
+    // --- LÓGICA DE FEEDBACK ADICIONADA ---
+    if (result?.error) {
+        toast.error("Erro ao renomear", { description: result.error });
+    } else {
+        toast.success("Workspace renomeado com sucesso!");
+        setOpen(false);
+    }
   }
 
   return (

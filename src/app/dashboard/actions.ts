@@ -23,7 +23,8 @@ import {
   deleteTransaction as _deleteTransaction,
   importTransactions as _importTransactions,
   stopTransactionRecurrence as _stopTransactionRecurrence,
-  getRecurringTransactions as _getRecurringTransactions
+  getRecurringTransactions as _getRecurringTransactions,
+  getUpcomingBills as _getUpcomingBills
 } from './actions/finance';
 
 import {
@@ -70,6 +71,7 @@ export const deleteTransaction = _deleteTransaction;
 export const importTransactions = _importTransactions;
 export const stopTransactionRecurrence = _stopTransactionRecurrence;
 export const getRecurringTransactions = _getRecurringTransactions;
+export const getUpcomingBills = _getUpcomingBills;
 
 // Categories
 export const upsertCategory = _upsertCategory;

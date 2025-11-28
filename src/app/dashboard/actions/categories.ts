@@ -4,6 +4,15 @@ import { prisma } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
 import { createAuditLog } from "@/lib/audit";
 import { validateUser, getActiveWorkspaceId } from "@/lib/action-utils";
+import { z } from "zod";
+
+const CategorySchema = z.object({
+  name: z.string().min(1, "Nome é obrigatório"),
+  // CORREÇÃO: Removido o objeto de options que causava o erro de build
+  type: z.enum(["INCOME", "EXPENSE"]), 
+  icon: z.string().optional(),
+  color: z.string().optional(),
+});
 
 export async function upsertCategory(formData: FormData, id?: string) {
   const { user, error } = await validateUser();
@@ -12,12 +21,13 @@ export async function upsertCategory(formData: FormData, id?: string) {
   const workspaceId = await getActiveWorkspaceId(user);
   if (!workspaceId) return { error: "Workspace não encontrado" };
 
-  const name = formData.get("name") as string;
-  const type = formData.get("type") as "INCOME" | "EXPENSE";
-  const icon = formData.get("icon") as string;
-  const color = formData.get("color") as string;
+  const parsed = CategorySchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+      // Retorna o erro do nome ou um erro genérico se o tipo for inválido
+      return { error: parsed.error.flatten().fieldErrors.name?.[0] || "Dados inválidos (verifique o tipo da categoria)" };
+  }
 
-  if (!name || !type) return { error: "Nome e Tipo são obrigatórios" };
+  const { name, type, icon, color } = parsed.data;
 
   try {
     if (id) {
@@ -53,20 +63,20 @@ export async function deleteCategory(id: string) {
   const { user, error } = await validateUser();
   if (error || !user) return { error };
 
-  // Verifica se tem uso
-  const category = await prisma.category.findUnique({ 
-      where: { id },
-      include: { _count: { select: { transactions: true } } }
-  });
+  try {
+    const category = await prisma.category.findUnique({ 
+        where: { id },
+        include: { _count: { select: { transactions: true } } }
+    });
 
-  if (!category) return { error: "Categoria não encontrada" };
-
-  // Se tiver muitas transações, poderia bloquear, mas aqui vamos permitir 
-  // (as transações ficarão sem categoria devido ao onDelete: SetNull no schema)
-  
-  await prisma.category.delete({ where: { id } });
-  
-  await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'DELETE', entity: 'Category', details: `Excluiu categoria: ${category.name} (${category._count.transactions} transações afetadas)` });
+    if (!category) return { error: "Categoria não encontrada" };
+    
+    await prisma.category.delete({ where: { id } });
+    
+    await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'DELETE', entity: 'Category', details: `Excluiu categoria: ${category.name}` });
+  } catch (e) {
+      return { error: "Erro ao excluir categoria." };
+  }
 
   revalidatePath('/dashboard/categories');
   revalidatePath('/dashboard/transactions');
