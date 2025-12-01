@@ -8,7 +8,6 @@ import { z } from "zod";
 
 const CategorySchema = z.object({
   name: z.string().min(1, "Nome é obrigatório"),
-  // CORREÇÃO: Removido o objeto de options que causava o erro de build
   type: z.enum(["INCOME", "EXPENSE"]), 
   icon: z.string().optional(),
   color: z.string().optional(),
@@ -23,8 +22,7 @@ export async function upsertCategory(formData: FormData, id?: string) {
 
   const parsed = CategorySchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
-      // Retorna o erro do nome ou um erro genérico se o tipo for inválido
-      return { error: parsed.error.flatten().fieldErrors.name?.[0] || "Dados inválidos (verifique o tipo da categoria)" };
+      return { error: parsed.error.flatten().fieldErrors.name?.[0] || "Dados inválidos" };
   }
 
   const { name, type, icon, color } = parsed.data;
@@ -37,12 +35,11 @@ export async function upsertCategory(formData: FormData, id?: string) {
       });
       await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'UPDATE', entity: 'Category', entityId: id, details: `Editou categoria: ${name}` });
     } else {
-      // Verifica duplicidade
       const existing = await prisma.category.findFirst({
         where: { workspaceId, name, type }
       });
       
-      if (existing) return { error: "Já existe uma categoria com este nome neste tipo." };
+      if (existing) return { error: "Já existe uma categoria com este nome." };
 
       const cat = await prisma.category.create({
         data: { name, type, icon, color, workspaceId }
@@ -64,12 +61,22 @@ export async function deleteCategory(id: string) {
   if (error || !user) return { error };
 
   try {
+    // 1. Verifica integridade antes de deletar
     const category = await prisma.category.findUnique({ 
         where: { id },
-        include: { _count: { select: { transactions: true } } }
+        include: { _count: { select: { transactions: true, budgets: true } } }
     });
 
     if (!category) return { error: "Categoria não encontrada" };
+
+    // Bloqueia se houver vínculos
+    if (category._count.transactions > 0) {
+        return { error: `Impossível excluir: Existem ${category._count.transactions} transações usando esta categoria.` };
+    }
+    
+    if (category._count.budgets > 0) {
+        return { error: "Impossível excluir: Existe um orçamento vinculado a esta categoria." };
+    }
     
     await prisma.category.delete({ where: { id } });
     

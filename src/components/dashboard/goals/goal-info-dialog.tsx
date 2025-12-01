@@ -1,218 +1,170 @@
 'use client';
 
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Info, TrendingUp, Calendar, AlertTriangle, CheckCircle2, Users } from "lucide-react";
-import { Progress } from "@/components/ui/progress";
+import { Info, Calculator, TrendingUp, Calendar, AlertTriangle, CheckCircle2, Clock, Users } from "lucide-react";
+import { formatCurrency } from "@/lib/utils";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
 
-interface TransactionData {
-  amount: number;
-  date: Date;
-  type: 'INCOME' | 'EXPENSE' | 'TRANSFER' | string;
-}
-
-interface GoalInfoProps {
-  goal: {
-    id: string;
-    name: string;
-    targetAmount: number;
-    currentAmount: number;
-    deadline: Date | null;
-    createdAt: Date;
-    transactions: TransactionData[];
-  };
-  // Nova prop opcional para dados personalizados
+interface GoalInfoDialogProps {
+  goal: any;
   myShare?: {
       percentage: number;
       target: number;
       saved: number;
+      totalTarget: number;
+  } | null;
+  insights?: {
+      monthlyNeeded: number;
+      avgSaved: number;
+      projectionDate: Date | null;
+      healthStatus: string;
+      daysLeft: number | null;
   } | null;
 }
 
-export function GoalInfoDialog({ goal, myShare }: GoalInfoProps) {
-  
-  const now = new Date();
-  const oneMonthAgo = new Date(); oneMonthAgo.setDate(now.getDate() - 30);
-  const threeMonthsAgo = new Date(); threeMonthsAgo.setDate(now.getDate() - 90);
-
-  // 1. Saldo Líquido Global (Últimos 30 dias)
-  const calculateNetSavings = (fromDate: Date) => {
-    return goal.transactions
-      .filter(t => new Date(t.date) >= fromDate)
-      .reduce((acc, t) => {
-        if (t.type === 'EXPENSE') return acc + Number(t.amount); 
-        if (t.type === 'INCOME') return acc - Number(t.amount);
-        return acc;
-      }, 0);
-  };
-
-  const savedLastMonth = calculateNetSavings(oneMonthAgo);
-  const savedLast3Months = calculateNetSavings(threeMonthsAgo);
-
-  // 2. Média Mensal Global
-  const daysSinceCreation = Math.max(1, (now.getTime() - new Date(goal.createdAt).getTime()) / (1000 * 60 * 60 * 24));
-  const monthsSinceCreation = Math.max(1, daysSinceCreation / 30.44);
-  const averageMonthly = Number(goal.currentAmount) / monthsSinceCreation;
-
-  // 3. Status
-  const remainingAmount = Math.max(0, goal.targetAmount - goal.currentAmount);
-  
-  // Lógica de Previsão de Término
-  let estimatedDate: Date | null = null;
-  if (remainingAmount > 0 && averageMonthly > 0) {
-    const monthsToFinish = remainingAmount / averageMonthly;
-    if (monthsToFinish < 1200) { 
-        const futureDate = new Date();
-        futureDate.setMonth(futureDate.getMonth() + Math.round(monthsToFinish));
-        estimatedDate = futureDate;
-    }
-  }
-
-  let status = "ON_TRACK"; 
-  if (goal.deadline) {
-      if (estimatedDate && estimatedDate > new Date(goal.deadline)) status = "DELAYED";
-      else if (!estimatedDate && remainingAmount > 0) status = "DELAYED";
-  }
-  if (goal.currentAmount >= goal.targetAmount) status = "COMPLETED";
-
-  const formatCurrency = (val: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
-
-  // === CÁLCULO DE RECOMENDAÇÃO MENSAL ===
-  let monthlyRecommendation = 0;
-  let myMonthlyRecommendation = 0;
-  
-  if (goal.deadline && remainingAmount > 0) {
-      const monthsUntilDeadline = (new Date(goal.deadline).getTime() - now.getTime()) / (1000 * 60 * 60 * 24 * 30.44);
-      
-      // Cálculo Global
-      if (monthsUntilDeadline <= 0) {
-          monthlyRecommendation = remainingAmount; 
-      } else {
-          monthlyRecommendation = remainingAmount / monthsUntilDeadline;
-      }
-
-      // Cálculo da Minha Parte (Se houver regra de compartilhamento)
-      if (myShare) {
-          const myRemaining = Math.max(0, myShare.target - myShare.saved);
-          if (monthsUntilDeadline <= 0) {
-              myMonthlyRecommendation = myRemaining;
-          } else {
-              myMonthlyRecommendation = myRemaining / monthsUntilDeadline;
-          }
-      }
-  }
-
+export function GoalInfoDialog({ goal, myShare, insights }: GoalInfoDialogProps) {
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-blue-400">
-          <Info className="w-4 h-4" />
+        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-blue-500 rounded-full">
+            <Info className="w-4 h-4" />
         </Button>
       </DialogTrigger>
-      <DialogContent className="bg-card border-border text-card-foreground sm:max-w-[500px]">
+      
+      <DialogContent className="bg-card border-border text-card-foreground sm:max-w-[450px] max-h-[85vh] overflow-y-auto scrollbar-thin">
         <DialogHeader>
-          <DialogTitle className="text-foreground flex items-center gap-2">
-            <TrendingUp className="w-5 h-5 text-blue-500" />
-            Análise: {goal.name}
+          <DialogTitle className="flex items-center gap-2">
+            <Info className="w-5 h-5 text-blue-500" />
+            Detalhes da Meta
           </DialogTitle>
+          <DialogDescription>
+            Raio-X completo do objetivo <strong>{goal.name}</strong>.
+          </DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-6 py-4">
-          
-          {/* BLOCO PRINCIPAL */}
-          <div className="bg-muted p-4 rounded-lg border border-border flex items-center justify-between">
-             <div>
-                <p className="text-xs text-muted-foreground uppercase">Previsão de Conclusão</p>
-                <p className="text-lg font-bold text-foreground">
-                    {status === "COMPLETED"
-                        ? "Objetivo Concluído! 🎉" 
-                        : estimatedDate 
-                            ? estimatedDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }) 
-                            : (averageMonthly <= 0 ? "Sem poupança mensal" : "Em mais de 100 anos")}
-                </p>
-             </div>
-             {status === 'DELAYED' && (
-                 <div className="flex flex-col items-end text-rose-500">
-                     <AlertTriangle className="w-6 h-6 mb-1" />
-                     <span className="text-xs font-bold">Risco de Atraso</span>
-                 </div>
-             )}
-             {status === 'ON_TRACK' && remainingAmount > 0 && (
-                 <div className="flex flex-col items-end text-emerald-500">
-                     <CheckCircle2 className="w-6 h-6 mb-1" />
-                     <span className="text-xs font-bold">No Prazo</span>
-                 </div>
-             )}
-          </div>
+        <div className="space-y-6 pt-4">
+            
+            {/* BLOCO 1: Participação Individual (Apenas para Meta Coletiva) */}
+            {myShare && (
+                <div className="space-y-4">
+                    <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-100 dark:border-purple-800/30">
+                        <h4 className="text-sm font-semibold text-purple-700 dark:text-purple-300 mb-2 flex items-center gap-2">
+                            <Users className="w-4 h-4" /> Sua Participação ({myShare.percentage}%)
+                        </h4>
+                        <div className="grid grid-cols-2 gap-4 text-xs">
+                            <div>
+                                <span className="block text-muted-foreground uppercase text-[10px]">Sua Cota</span>
+                                <span className="font-bold text-lg">{formatCurrency(myShare.target)}</span>
+                            </div>
+                            <div>
+                                <span className="block text-muted-foreground uppercase text-[10px]">Você Guardou</span>
+                                <span className="font-bold text-lg text-purple-600">{formatCurrency(myShare.saved)}</span>
+                            </div>
+                        </div>
+                        {/* Barra de progresso individual */}
+                        <div className="w-full bg-purple-200 dark:bg-purple-900/50 h-1.5 rounded-full overflow-hidden mt-3">
+                             <div className="bg-purple-500 h-full" style={{ width: `${Math.min((myShare.saved / myShare.target) * 100, 100)}%` }}></div>
+                        </div>
+                        <p className="text-[10px] text-purple-600/80 mt-1 text-right">
+                            {((myShare.saved / myShare.target) * 100).toFixed(1)}% da sua parte
+                        </p>
+                    </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="bg-card p-3 rounded-lg border border-border">
-                <p className="text-xs text-muted-foreground">Poupança Global (30 dias)</p>
-                <p className={`text-xl font-semibold ${savedLastMonth >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                    {formatCurrency(savedLastMonth)}
-                </p>
-            </div>
-            <div className="bg-card p-3 rounded-lg border border-border">
-                <p className="text-xs text-muted-foreground">Média Histórica (Global)</p>
-                <p className={`text-xl font-semibold ${averageMonthly >= 0 ? 'text-blue-500' : 'text-rose-500'}`}>
-                    {formatCurrency(averageMonthly)}
-                </p>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Progresso Global</span>
-                <span className={`${savedLast3Months >= 0 ? 'text-foreground' : 'text-rose-500'}`}>
-                    {formatCurrency(goal.currentAmount)} de {formatCurrency(goal.targetAmount)}
-                </span>
-            </div>
-            <Progress value={(Number(goal.currentAmount) / (goal.targetAmount || 1)) * 100} className="h-1.5 bg-secondary" />
-          </div>
-
-          {goal.deadline && remainingAmount > 0 && (
-            <div className="flex flex-col gap-3 bg-muted/50 p-3 rounded border border-border">
-                <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                    <Calendar className="w-4 h-4 text-muted-foreground" />
-                    <div className="flex-1">
-                        <p>Prazo final: <span className="text-foreground font-medium">{new Date(goal.deadline).toLocaleDateString('pt-BR')}</span></p>
+                    {/* Divisor Visual */}
+                    <div className="relative flex py-1 items-center">
+                        <div className="flex-grow border-t border-border"></div>
+                        <span className="flex-shrink-0 mx-2 text-[10px] text-muted-foreground uppercase font-semibold">Progresso Geral (Grupo)</span>
+                        <div className="flex-grow border-t border-border"></div>
                     </div>
                 </div>
+            )}
 
-                {status === 'DELAYED' && (
-                    <div className="pt-2 border-t border-border/50 space-y-2">
-                        {/* Se for meta compartilhada, mostra a SUA recomendação em destaque */}
-                        {myShare ? (
-                            <>
-                                <div className="flex items-center gap-2 text-purple-500 bg-purple-500/10 p-2 rounded">
-                                    <Users className="w-4 h-4" />
-                                    <div>
-                                        <p className="text-xs font-bold uppercase">Sua Recomendação ({myShare.percentage}%)</p>
-                                        <p className="text-sm">
-                                            Guarde <span className="font-bold">{formatCurrency(myMonthlyRecommendation)}/mês</span> para cumprir sua parte.
-                                        </p>
-                                    </div>
-                                </div>
-                                <p className="text-xs text-muted-foreground ml-1">
-                                    (Recomendação Global: {formatCurrency(monthlyRecommendation)}/mês)
-                                </p>
-                            </>
-                        ) : (
-                            <p className="text-sm text-rose-500">
-                                Para terminar no prazo, o ideal seria guardar <span className="font-bold">{formatCurrency(monthlyRecommendation)}/mês</span>.
+            {/* BLOCO 2: Insights Analíticos (Agora aparece para TODOS) */}
+            {insights && (
+                <div className="space-y-4">
+                    {/* Status Geral */}
+                    <div className={`p-3 rounded-lg border flex items-start gap-3 ${
+                        insights.healthStatus === 'healthy' ? 'bg-emerald-50 border-emerald-200 text-emerald-800 dark:bg-emerald-900/20 dark:border-emerald-800 dark:text-emerald-300' :
+                        insights.healthStatus === 'warning' ? 'bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-900/20 dark:border-amber-800 dark:text-amber-300' :
+                        insights.healthStatus === 'danger' ? 'bg-rose-50 border-rose-200 text-rose-800 dark:bg-rose-900/20 dark:border-rose-800 dark:text-rose-300' :
+                        insights.healthStatus === 'completed' ? 'bg-emerald-100 border-emerald-200 text-emerald-800' :
+                        'bg-muted border-border text-muted-foreground'
+                    }`}>
+                        {insights.healthStatus === 'healthy' || insights.healthStatus === 'completed' ? <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5" /> :
+                         insights.healthStatus === 'danger' ? <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" /> :
+                         <Info className="w-5 h-5 shrink-0 mt-0.5" />}
+                        
+                        <div className="text-xs">
+                            <p className="font-bold mb-0.5">
+                                {insights.healthStatus === 'healthy' ? (myShare ? 'Grupo Adiantado!' : 'Excelente Ritmo!') :
+                                 insights.healthStatus === 'warning' ? (myShare ? 'Grupo em Atenção' : 'Atenção ao Ritmo') :
+                                 insights.healthStatus === 'danger' ? (myShare ? 'Grupo Atrasado' : 'Risco de Atraso') :
+                                 insights.healthStatus === 'completed' ? 'Meta Concluída!' :
+                                 'Sem dados suficientes'}
                             </p>
-                        )}
+                            <p className="opacity-90 leading-snug">
+                                {insights.healthStatus === 'healthy' ? ` ${myShare ? 'O grupo está' : 'você está'} guardando mais do que o necessário. Continuem assim!` :
+                                 insights.healthStatus === 'danger' ? `Neste ritmo, ${myShare ? 'o grupo' : 'você'} não alcançará a meta no prazo estipulado.` :
+                                 insights.healthStatus === 'completed' ? 'Parabéns! O objetivo foi alcançado.' :
+                                 `Mantenha a constância nos depósitos para atingir o objetivo.`}
+                            </p>
+                        </div>
                     </div>
-                )}
-            </div>
-          )}
 
+                    <div className="grid grid-cols-2 gap-3">
+                        {/* Sugestão Mensal */}
+                        <div className="bg-muted/30 p-3 rounded-lg border border-border/50">
+                            <p className="text-[10px] uppercase text-muted-foreground mb-1 flex items-center gap-1">
+                                <Calculator className="w-3 h-3" /> Sugestão {myShare ? '(Total)' : ''}
+                            </p>
+                            <p className="text-lg font-bold">
+                                {insights.monthlyNeeded > 0 ? formatCurrency(insights.monthlyNeeded) : '-'}
+                            </p>
+                            <p className="text-[10px] text-muted-foreground mt-1">
+                                Depósito mensal necessário
+                            </p>
+                        </div>
+
+                        {/* Média Atual */}
+                        <div className="bg-muted/30 p-3 rounded-lg border border-border/50">
+                            <p className="text-[10px] uppercase text-muted-foreground mb-1 flex items-center gap-1">
+                                <TrendingUp className="w-3 h-3" /> Média {myShare ? 'do Grupo' : 'Real'}
+                            </p>
+                            <p className={`text-lg font-bold ${insights.avgSaved < insights.monthlyNeeded && insights.monthlyNeeded > 0 ? 'text-rose-500' : ''}`}>
+                                {formatCurrency(insights.avgSaved)}
+                            </p>
+                             <p className="text-[10px] text-muted-foreground mt-1">
+                                Por mês (histórico)
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Previsão de Conclusão */}
+                    <div className="bg-blue-50 dark:bg-blue-900/10 p-3 rounded-lg border border-blue-100 dark:border-blue-800/30">
+                        <p className="text-[10px] uppercase text-blue-600 dark:text-blue-400 mb-1 flex items-center gap-1">
+                            <Calendar className="w-3 h-3" /> Previsão de Conclusão {myShare ? '(Global)' : ''}
+                        </p>
+                        <div className="flex justify-between items-end">
+                            <p className="text-lg font-bold text-blue-700 dark:text-blue-300">
+                                {insights.projectionDate ? format(insights.projectionDate, "MMMM 'de' yyyy", { locale: ptBR }) : "Indefinido"}
+                            </p>
+                            {insights.daysLeft !== null && insights.daysLeft > 0 && (
+                                <span className="text-[10px] text-blue-500 font-medium bg-blue-100 dark:bg-blue-900/50 px-2 py-0.5 rounded-full">
+                                    Faltam {Math.ceil(insights.daysLeft / 30)} meses
+                                </span>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+            
+            {/* Rodapé Padrão */}
+            <div className="bg-muted/20 p-3 rounded-lg text-xs text-muted-foreground flex gap-2">
+                <Clock className="w-4 h-4 shrink-0" />
+                <p>Meta criada em: {new Date(goal.createdAt).toLocaleDateString('pt-BR')}</p>
+            </div>
         </div>
       </DialogContent>
     </Dialog>

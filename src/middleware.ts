@@ -5,20 +5,24 @@ export default withAuth(
   async function middleware(req) {
     const token = req.nextauth.token;
     const isDashboard = req.nextUrl.pathname.startsWith("/dashboard");
+    const isSettings = req.nextUrl.pathname.startsWith("/dashboard/settings");
 
     if (isDashboard && token) {
       const user = token as any;
       const status = user.subscriptionStatus;
+      const planType = user.planType || 'FREE'; // Fallback seguro
       
-      // Verifica se tem data de vencimento
       const nextPayment = user.nextPayment ? new Date(user.nextPayment) : null;
       const now = new Date();
       
-      // Lógica de Liberação:
-      // 1. Se for ACTIVE, libera.
-      // 2. Se for TRIAL_PREMIUM, libera.
-      // 3. Se for CANCELED, mas a data de vencimento ainda for futura, libera.
+      // Lógica de Validação:
+      // 1. Sempre permite acesso a configurações (para o usuário poder pagar/cancelar/editar perfil)
+      // 2. Permite se for plano FREE
+      // 3. Permite se estiver ATIVO ou em TRIAL
+      // 4. Permite se Cancelado mas ainda dentro do prazo pago
       const isValid = 
+        isSettings || 
+        planType === 'FREE' ||
         status === 'ACTIVE' || 
         status === 'TRIAL_PREMIUM' || 
         (status === 'CANCELED' && nextPayment && nextPayment > now);

@@ -1,5 +1,6 @@
 'use client';
 
+// ... (Imports iguais ao original)
 import { useState, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -21,22 +22,18 @@ interface ImportModalProps {
 }
 
 export function ImportTransactionsModal({ accounts, categories }: ImportModalProps) {
+  // ... (Estados iniciais iguais ao original)
   const [open, setOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  
-  // Estado Geral
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [file, setFile] = useState<File | null>(null);
   const [accountId, setAccountId] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Estado Mapeamento
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [mapping, setMapping] = useState({ date: '', description: '', amount: '', category: '' });
-
-  // Estado Revisão (Tabela)
   const [parsedTransactions, setParsedTransactions] = useState<any[]>([]);
 
+  // ... (resetState, handleFileChange, handleDrop, handleFileSelection iguais)
   const resetState = () => {
       setFile(null);
       setAccountId("");
@@ -65,7 +62,6 @@ export function ImportTransactionsModal({ accounts, categories }: ImportModalPro
               complete: (results) => {
                   if (results.meta.fields) {
                       setCsvHeaders(results.meta.fields);
-                      // Auto-mapeamento inteligente
                       const initialMap = { date: '', description: '', amount: '', category: '' };
                       results.meta.fields.forEach(h => {
                           const lower = h.toLowerCase();
@@ -81,7 +77,7 @@ export function ImportTransactionsModal({ accounts, categories }: ImportModalPro
       }
   };
 
-  // --- HELPERS DE PARSE ---
+  // ... (Helpers parseDate e parseAmount iguais)
   const parseDate = (dateStr: string) => {
       if (!dateStr) return null;
       dateStr = dateStr.trim();
@@ -104,19 +100,17 @@ export function ImportTransactionsModal({ accounts, categories }: ImportModalPro
       return parseFloat(clean);
   };
 
-  // --- NAVEGAÇÃO ---
   const handleNextStep = async () => {
       if (step === 1) {
           if (!file || !accountId) return toast.error("Selecione arquivo e conta.");
           if (file.name.toLowerCase().endsWith('.csv')) setStep(2);
-          else processFile(); // OFX vai direto pro processamento
+          else processFile(); 
       } else if (step === 2) {
           if (!mapping.date || !mapping.amount || !mapping.description) return toast.error("Mapeie as colunas obrigatórias.");
           processFile();
       }
   };
 
-  // Processa o arquivo (CSV ou OFX) e gera a lista para revisão
   async function processFile() {
     setIsLoading(true);
     try {
@@ -137,16 +131,16 @@ export function ImportTransactionsModal({ accounts, categories }: ImportModalPro
                         if (!pDate || isNaN(pAmount)) return null;
 
                         return {
-                            id: index, // ID temporário para a tabela
+                            id: index,
                             date: pDate,
                             description: row[mapping.description] || "Sem descrição",
                             amount: pAmount,
-                            categoryId: null, // Usuário escolhe na tabela
+                            categoryId: null,
                             categoryName: mapping.category ? row[mapping.category] : null
                         };
                     }).filter(Boolean);
                     setParsedTransactions(transactions);
-                    setStep(3); // Vai para revisão
+                    setStep(3);
                     setIsLoading(false);
                 }
             });
@@ -176,7 +170,6 @@ export function ImportTransactionsModal({ accounts, categories }: ImportModalPro
     }
   }
 
-  // --- AÇÕES NA TABELA DE REVISÃO ---
   const handleRemoveTransaction = (id: number) => {
       setParsedTransactions(prev => prev.filter(t => t.id !== id));
   };
@@ -185,21 +178,43 @@ export function ImportTransactionsModal({ accounts, categories }: ImportModalPro
       setParsedTransactions(prev => prev.map(t => t.id === id ? { ...t, categoryId: catId } : t));
   };
 
+  // --- NOVA LÓGICA DE CHUNKING ---
   const handleFinalImport = async () => {
       setIsLoading(true);
-      const result = await importTransactions(accountId, parsedTransactions);
-      if (result?.error) toast.error(result.error);
-      else {
-          toast.success(`${parsedTransactions.length} transações importadas!`);
-          setOpen(false);
-          resetState();
+      const CHUNK_SIZE = 500;
+      const chunks = [];
+      
+      for (let i = 0; i < parsedTransactions.length; i += CHUNK_SIZE) {
+          chunks.push(parsedTransactions.slice(i, i + CHUNK_SIZE));
       }
+
+      let successCount = 0;
+      let errorCount = 0;
+
+      for (const chunk of chunks) {
+          const result = await importTransactions(accountId, chunk);
+          if (result?.error) {
+              errorCount += chunk.length;
+              console.error(result.error);
+          } else {
+              successCount += chunk.length;
+          }
+      }
+
+      if (errorCount > 0) {
+          toast.warning(`Importação parcial: ${successCount} salvos, ${errorCount} falharam.`);
+      } else {
+          toast.success(`${successCount} transações importadas com sucesso!`);
+      }
+      
+      setOpen(false);
+      resetState();
       setIsLoading(false);
   };
 
   const themeLightBg = "bg-orange-50 dark:bg-orange-950/20";
-  const themeColor = "text-orange-500";
 
+  // ... (JSX de Renderização igual ao original)
   return (
     <Dialog open={open} onOpenChange={(v) => { setOpen(v); if(!v) resetState(); }}>
       <DialogTrigger asChild>

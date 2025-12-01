@@ -1,14 +1,13 @@
 'use client';
 
-// ... (Imports iguais ao anterior)
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowUpCircle, ArrowDownCircle, Loader2, CalendarIcon, Plus, CreditCard as CreditCardIcon, RefreshCw, Layers, Pencil } from "lucide-react";
+import { Loader2, CalendarIcon, Plus, CreditCard as CreditCardIcon, RefreshCw, Layers, Pencil } from "lucide-react";
 import { upsertTransaction } from '@/app/dashboard/actions';
 import { toast } from "sonner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -41,9 +40,14 @@ export function TransactionModal({ transaction, accounts, cards, categories, chi
   const [isLoading, setIsLoading] = useState(false);
   const [type, setType] = useState<'EXPENSE' | 'INCOME' | 'TRANSFER'>(transaction?.type || 'EXPENSE');
   const [date, setDate] = useState<Date>(transaction?.date ? new Date(transaction.date) : new Date());
-  const [isRecurring, setIsRecurring] = useState(transaction?.isRecurring || false);
-  const [recurrence, setRecurrence] = useState(transaction?.frequency || 'MONTHLY');
-  const [installments, setInstallments] = useState(transaction?.installmentTotal || 1);
+  
+  // Controle de Abas/Método de Pagamento
+  const [paymentMethod, setPaymentMethod] = useState(transaction?.creditCardId ? "card" : "account");
+
+  const [isRecurring, setIsRecurring] = useState(transaction?.isRecurring || !!transaction?.isInstallment || false);
+  const [recurrence, setRecurrence] = useState(transaction?.frequency || (transaction?.isInstallment ? 'INSTALLMENT' : 'MONTHLY'));
+  const [installments, setInstallments] = useState(transaction?.installmentTotal || 2);
+  
   const [showAccountModal, setShowAccountModal] = useState(false);
   const [showCardModal, setShowCardModal] = useState(false);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
@@ -52,12 +56,25 @@ export function TransactionModal({ transaction, accounts, cards, categories, chi
   const themeColor = type === 'EXPENSE' ? 'text-rose-500' : (type === 'INCOME' ? 'text-emerald-500' : 'text-blue-500');
   const themeBg = type === 'EXPENSE' ? 'bg-rose-500' : (type === 'INCOME' ? 'bg-emerald-500' : 'bg-blue-500');
 
+  // Resetar recorrência inválida se mudar método de pagamento
+  useEffect(() => {
+    if (paymentMethod === 'account' && recurrence === 'INSTALLMENT') {
+        setRecurrence('MONTHLY');
+    }
+  }, [paymentMethod, recurrence]);
+
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsLoading(true);
     const formData = new FormData(event.currentTarget);
     formData.set('date', date.toISOString().split('T')[0]);
     formData.set('type', type);
+    
+    // Forçar paymentMethod correto baseado na aba ativa
+    if (type !== 'TRANSFER') {
+        formData.set('paymentMethod', paymentMethod === 'card' ? 'CREDIT_CARD' : 'ACCOUNT');
+    }
+
     if (isRecurring) {
         formData.set('recurrence', recurrence);
         if (recurrence === 'INSTALLMENT') {
@@ -122,7 +139,6 @@ export function TransactionModal({ transaction, accounts, cards, categories, chi
                 </div>
             </div>
 
-            {/* CORPO DO FORMULÁRIO (Igual ao anterior, apenas mantendo estrutura) */}
             <div className="p-6 space-y-5">
                 <div className="grid grid-cols-[1fr,auto] gap-3">
                     <div className="grid gap-1.5">
@@ -192,7 +208,7 @@ export function TransactionModal({ transaction, accounts, cards, categories, chi
                         </div>
                     </div>
                 ) : (
-                    <Tabs defaultValue={transaction?.creditCardId ? "card" : "account"} className="w-full">
+                    <Tabs value={paymentMethod} onValueChange={setPaymentMethod} className="w-full">
                         <TabsList className="grid w-full grid-cols-2 h-9 bg-muted/50 p-1 mb-2">
                             <TabsTrigger value="account" className="text-xs font-medium">Conta Bancária</TabsTrigger>
                             <TabsTrigger value="card" className="text-xs font-medium" disabled={type === 'INCOME'}>Cartão de Crédito</TabsTrigger>
@@ -208,7 +224,6 @@ export function TransactionModal({ transaction, accounts, cards, categories, chi
                                     <Button type="button" size="icon" variant="secondary" className="shrink-0" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowAccountModal(true); }}><Plus className="w-4 h-4" /></Button>
                                 </div>
                             </div>
-                            <input type="hidden" name="paymentMethod" value="ACCOUNT" />
                         </TabsContent>
                         <TabsContent value="card" className="mt-0">
                             <div className="grid gap-1.5">
@@ -221,7 +236,6 @@ export function TransactionModal({ transaction, accounts, cards, categories, chi
                                     <Button type="button" size="icon" variant="secondary" className="shrink-0" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowCardModal(true); }}><Plus className="w-4 h-4" /></Button>
                                 </div>
                             </div>
-                            <input type="hidden" name="paymentMethod" value="CREDIT_CARD" />
                         </TabsContent>
                     </Tabs>
                 )}
@@ -238,10 +252,16 @@ export function TransactionModal({ transaction, accounts, cards, categories, chi
                                     <Label className="text-[10px] text-muted-foreground uppercase">Frequência</Label>
                                     <Select value={recurrence} onValueChange={setRecurrence}>
                                         <SelectTrigger className="h-8 text-xs bg-background"><SelectValue /></SelectTrigger>
-                                        <SelectContent><SelectItem value="MONTHLY">Mensal (Fixo)</SelectItem><SelectItem value="WEEKLY">Semanal</SelectItem><SelectItem value="YEARLY">Anual</SelectItem>{type === 'EXPENSE' && <SelectItem value="INSTALLMENT">Parcelado</SelectItem>}</SelectContent>
+                                        <SelectContent>
+                                            <SelectItem value="MONTHLY">Mensal (Fixo)</SelectItem>
+                                            <SelectItem value="WEEKLY">Semanal</SelectItem>
+                                            <SelectItem value="YEARLY">Anual</SelectItem>
+                                            {/* Correção: Parcelamento APENAS para Despesas no Cartão */}
+                                            {type === 'EXPENSE' && paymentMethod === 'card' && <SelectItem value="INSTALLMENT">Parcelado</SelectItem>}
+                                        </SelectContent>
                                     </Select>
                                 </div>
-                                {recurrence === 'INSTALLMENT' && type === 'EXPENSE' && (
+                                {recurrence === 'INSTALLMENT' && type === 'EXPENSE' && paymentMethod === 'card' && (
                                     <div className="grid gap-1.5">
                                         <Label className="text-[10px] text-muted-foreground uppercase">Parcelas</Label>
                                         <div className="relative">

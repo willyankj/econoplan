@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from "@/lib/prisma";
+import { addMonths, addWeeks, addYears } from "date-fns";
 
 export async function GET(request: Request) {
   const authHeader = request.headers.get('authorization');
@@ -15,6 +16,9 @@ export async function GET(request: Request) {
         where: {
             isRecurring: true,
             nextRecurringDate: { lte: today }
+        },
+        include: {
+            workspace: true // Necessário para pegar o tenantId para auditoria
         }
     });
 
@@ -22,44 +26,62 @@ export async function GET(request: Request) {
 
     for (const tx of dues) {
         try {
-            // 1. Copia a transação
-            await prisma.transaction.create({
-                data: {
-                    description: tx.description,
-                    amount: tx.amount,
-                    type: tx.type,
-                    date: new Date(today),
-                    workspaceId: tx.workspaceId,
-                    bankAccountId: tx.bankAccountId,
-                    creditCardId: tx.creditCardId,
-                    categoryId: tx.categoryId,
-                    isPaid: false, 
-                    isRecurring: false, 
-                    frequency: 'NONE'
-                }
-            });
+            // ATOMICIDADE: Usamos transaction para garantir que não criamos duplicatas
+            // caso a atualização da data falhe no meio do caminho.
+            await prisma.$transaction(async (ptx) => {
+                // 1. Cria a nova transação (Filha)
+                const newTx = await ptx.transaction.create({
+                    data: {
+                        description: tx.description,
+                        amount: tx.amount,
+                        type: tx.type,
+                        date: new Date(today), // Cria com a data de execução (hoje)
+                        workspaceId: tx.workspaceId,
+                        bankAccountId: tx.bankAccountId,
+                        creditCardId: tx.creditCardId,
+                        categoryId: tx.categoryId,
+                        isPaid: false, // Recorrências nascem em aberto para confirmação
+                        isRecurring: false, 
+                        frequency: 'NONE'
+                    }
+                });
 
-            // 2. Atualiza a data da próxima
-            if (tx.nextRecurringDate) {
-                const nextDate = new Date(tx.nextRecurringDate);
-                if (tx.frequency === 'WEEKLY') nextDate.setDate(nextDate.getDate() + 7);
-                else if (tx.frequency === 'YEARLY') nextDate.setFullYear(nextDate.getFullYear() + 1);
-                else nextDate.setMonth(nextDate.getMonth() + 1);
+                // 2. Calcula a próxima data corretamente usando date-fns
+                // (Evita o bug de pular meses como Jan 31 -> Mar 03)
+                let nextDate = new Date(tx.nextRecurringDate!);
+                if (tx.frequency === 'WEEKLY') nextDate = addWeeks(nextDate, 1);
+                else if (tx.frequency === 'YEARLY') nextDate = addYears(nextDate, 1);
+                else nextDate = addMonths(nextDate, 1); // Default MONTHLY
 
-                await prisma.transaction.update({
+                // 3. Atualiza a transação original (Mãe)
+                await ptx.transaction.update({
                     where: { id: tx.id },
                     data: { nextRecurringDate: nextDate }
                 });
-            }
+
+                // 4. Auditoria (Opcional, mas recomendado para rastreio)
+                await ptx.auditLog.create({
+                    data: {
+                        tenantId: tx.workspace.tenantId,
+                        userId: 'system-cron', // Marcador de sistema
+                        action: 'CREATE',
+                        entity: 'Transaction',
+                        entityId: newTx.id,
+                        details: `Recorrência automática: ${tx.description}`
+                    }
+                });
+            });
+
             processed++;
         } catch (err) {
             console.error(`Erro ao processar transação ${tx.id}:`, err);
+            // Não damos throw aqui para não travar a fila inteira se um falhar
         }
     }
 
     return NextResponse.json({ success: true, processed });
   } catch (error: any) {
-    console.error("[CRON RECURRING] Erro:", error);
+    console.error("[CRON RECURRING] Erro Fatal:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

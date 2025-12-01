@@ -2,13 +2,13 @@
 
 import { prisma } from "@/lib/prisma";
 import { validateUser, getActiveWorkspaceId } from "@/lib/action-utils";
-import { addMonths, startOfMonth, endOfMonth, format, subMonths, differenceInCalendarMonths, isBefore } from "date-fns";
+import { addMonths, startOfMonth, endOfMonth, format, subMonths, differenceInCalendarMonths, isBefore, addWeeks, addYears, isSameMonth } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
 const toDecimal = (num: any) => Number(num) || 0;
 
 // ============================================================================
-// 1. ORÁCULO FINANCEIRO (Tenant ou Workspace Específico)
+// 1. ORÁCULO FINANCEIRO (Corrigido e Preciso)
 // ============================================================================
 export async function getTenantOracleData(filterWorkspaceId?: string, dateRange?: { from: Date, to: Date }) {
   const { user } = await validateUser('org_view');
@@ -16,13 +16,12 @@ export async function getTenantOracleData(filterWorkspaceId?: string, dateRange?
 
   const today = new Date();
   
-  // Se não houver dataRange, projeta 6 meses. Se houver, usa o 'to', mas garante pelo menos 1 mês à frente.
+  // Define até quando vamos projetar
   let projectUntil = dateRange?.to ? new Date(dateRange.to) : addMonths(today, 6);
   if (isBefore(projectUntil, today)) {
       projectUntil = addMonths(today, 1);
   }
 
-  // Calcula quantos meses vamos iterar
   const monthsToProject = Math.max(1, differenceInCalendarMonths(projectUntil, today));
 
   const workspaceFilter = filterWorkspaceId 
@@ -35,7 +34,7 @@ export async function getTenantOracleData(filterWorkspaceId?: string, dateRange?
   });
   let currentBalance = accounts.reduce((acc, cur) => acc + toDecimal(cur.balance), 0);
 
-  // 2. Transações já lançadas no futuro (Parcelas de cartão, agendamentos manuais)
+  // 2. Transações REAIS já lançadas (Parcelas, Agendamentos)
   const futureTransactions = await prisma.transaction.findMany({
     where: {
       workspace: workspaceFilter,
@@ -43,48 +42,62 @@ export async function getTenantOracleData(filterWorkspaceId?: string, dateRange?
     }
   });
 
-  // 3. Modelos de recorrência (Para projetar onde não há lançamento ainda)
-  const recurringTransactions = await prisma.transaction.findMany({
+  // 3. Recorrências Ativas
+  const recurringDefs = await prisma.transaction.findMany({
     where: {
       workspace: workspaceFilter,
       isRecurring: true,
-      // Opcional: checar se nextRecurringDate ainda é válida se tiver essa lógica
+      nextRecurringDate: { not: null } // Só projeta se tiver próxima data definida
     }
+  });
+
+  // --- SIMULAÇÃO DE PROJEÇÃO ---
+  // Mapa para armazenar projeções por mês (Key: "YYYY-MM")
+  const projectionMap = new Map<string, { income: number, expense: number }>();
+
+  recurringDefs.forEach(def => {
+      let pointer = new Date(def.nextRecurringDate!);
+      
+      // Enquanto a data simulada for menor que o limite da projeção
+      while (pointer <= projectUntil) {
+          const key = format(pointer, 'yyyy-MM');
+          
+          if (!projectionMap.has(key)) projectionMap.set(key, { income: 0, expense: 0 });
+          const entry = projectionMap.get(key)!;
+
+          if (def.type === 'INCOME') entry.income += toDecimal(def.amount);
+          else entry.expense += toDecimal(def.amount);
+
+          // Avança o ponteiro baseado na frequência
+          if (def.frequency === 'WEEKLY') pointer = addWeeks(pointer, 1);
+          else if (def.frequency === 'YEARLY') pointer = addYears(pointer, 1);
+          else pointer = addMonths(pointer, 1); // Default Mensal
+      }
   });
 
   const timeline = [];
   let runningBalance = currentBalance;
 
-  // Loop mês a mês
+  // Loop mês a mês para montar a timeline
   for (let i = 0; i <= monthsToProject; i++) {
     const currentDate = addMonths(today, i);
     const monthStart = startOfMonth(currentDate);
     const monthEnd = endOfMonth(currentDate);
     const monthLabel = format(currentDate, 'MMM', { locale: ptBR }).toUpperCase();
+    const monthKey = format(currentDate, 'yyyy-MM');
 
-    // A. Soma o que já existe de concreto (Parcelas, Agendamentos)
+    // A. Soma Transações Reais (DB)
     const monthRealTx = futureTransactions.filter(t => t.date >= monthStart && t.date <= monthEnd);
     const incomeReal = monthRealTx.filter(t => t.type === 'INCOME').reduce((sum, t) => sum + toDecimal(t.amount), 0);
     const expenseReal = monthRealTx.filter(t => t.type === 'EXPENSE').reduce((sum, t) => sum + toDecimal(t.amount), 0);
 
-    let incomeProjected = 0;
-    let expenseProjected = 0;
+    // B. Soma Projeções Simuladas (Memória)
+    const projected = projectionMap.get(monthKey) || { income: 0, expense: 0 };
 
-    // B. Projeta recorrências (apenas meses futuros, mês 0 assume-se que já tem lançamentos ou saldo real)
-    if (i > 0) { 
-        recurringTransactions.forEach(t => {
-             // Simulação simples: Se é recorrente, entra no fluxo
-             // Idealmente, verificar se já não existe uma transação 'real' criada para esta recorrência neste mês para não duplicar
-             if (t.type === 'INCOME') incomeProjected += toDecimal(t.amount);
-             else expenseProjected += toDecimal(t.amount);
-        });
-    }
-
-    const totalIncome = incomeReal + incomeProjected;
-    const totalExpense = expenseReal + expenseProjected;
+    const totalIncome = incomeReal + projected.income;
+    const totalExpense = expenseReal + projected.expense;
     const netChange = totalIncome - totalExpense;
     
-    // Atualiza o saldo acumulado
     runningBalance += netChange;
 
     timeline.push({
@@ -97,8 +110,7 @@ export async function getTenantOracleData(filterWorkspaceId?: string, dateRange?
     });
   }
 
-  // Filtra o retorno visual baseado no range selecionado pelo usuário, 
-  // mas o cálculo do saldo (runningBalance) foi feito desde "hoje" para manter a consistência matemática.
+  // Filtro final visual
   const filteredData = timeline.filter(item => {
       if (!dateRange) return true; 
       return item.dateRef >= startOfMonth(dateRange.from) && item.dateRef <= endOfMonth(dateRange.to);
@@ -108,29 +120,25 @@ export async function getTenantOracleData(filterWorkspaceId?: string, dateRange?
 }
 
 // ============================================================================
-// 2. RAIO-X DE ENDIVIDAMENTO (Faturas Futuras Reais)
-
+// 2. RAIO-X DE ENDIVIDAMENTO (Mantido igual, lógica estava correta)
 export async function getTenantDebtXRayData(filterWorkspaceId?: string) {
     const { user } = await validateUser('org_view');
     if (!user) return { chartData: [], cardNames: [] };
   
     const today = new Date();
-    // Busca transações futuras o suficiente para cobrir parcelamentos longos (18 meses)
     const searchEnd = addMonths(today, 18); 
   
     const workspaceFilter = filterWorkspaceId 
       ? { id: filterWorkspaceId, tenantId: user.tenantId }
       : { tenantId: user.tenantId };
   
-    // 1. Busca apenas o que NÃO FOI PAGO (isPaid: false)
-    // Isso garante que quando você paga a fatura, o gasto some daqui.
     const cardTransactions = await prisma.transaction.findMany({
       where: {
         workspace: workspaceFilter,
         type: 'EXPENSE',
         creditCardId: { not: null },
         isPaid: false, 
-        date: { lte: searchEnd } // Pega tudo até o fim da busca
+        date: { lte: searchEnd }
       },
       include: { creditCard: true }
     });
@@ -138,7 +146,6 @@ export async function getTenantDebtXRayData(filterWorkspaceId?: string) {
     const monthsMap = new Map<string, any>();
     const cardSet = new Set<string>();
   
-    // Inicializa os próximos 12 meses no gráfico (Visualização)
     for (let i = 0; i < 12; i++) {
         const d = addMonths(today, i);
         const key = format(d, 'MMM/yy', { locale: ptBR }).toUpperCase();
@@ -152,30 +159,22 @@ export async function getTenantDebtXRayData(filterWorkspaceId?: string) {
         const closingDay = t.creditCard.closingDay;
         const dueDay = t.creditCard.dueDay;
   
-        // Lógica de Ciclo do Cartão:
-        // 1. Define a data de fechamento no mês da compra
         let referenceClosingDate = new Date(txDate.getFullYear(), txDate.getMonth(), closingDay);
         
-        // 2. Se a compra foi DEPOIS do fechamento (ou no dia), joga para a próxima fatura
         if (txDate.getDate() >= closingDay) {
             referenceClosingDate = addMonths(referenceClosingDate, 1);
         }
   
-        // 3. A data de vencimento é baseada no mês dessa fatura de referência
         let dueDate = new Date(referenceClosingDate.getFullYear(), referenceClosingDate.getMonth(), dueDay);
         
-        // Ajuste fino: Se o dia de vencimento for antes do fechamento (ex: fecha dia 25, vence dia 5),
-        // o vencimento é no mês seguinte ao fechamento.
         if (dueDate <= referenceClosingDate) {
             dueDate = addMonths(dueDate, 1);
         }
   
-        // Agora agrupamos pela DATA DE VENCIMENTO CALCULADA, não pela data da compra
         const key = format(dueDate, 'MMM/yy', { locale: ptBR }).toUpperCase();
         const cardName = t.creditCard.name;
         cardSet.add(cardName);
   
-        // Só adiciona se estiver dentro do intervalo de visualização (12 meses)
         if (monthsMap.has(key)) {
             const entry = monthsMap.get(key);
             entry[cardName] = (entry[cardName] || 0) + toDecimal(t.amount);
@@ -190,8 +189,7 @@ export async function getTenantDebtXRayData(filterWorkspaceId?: string) {
   }
   
   // ============================================================================
-  // 3. COMPARATIVO MÊS A MÊS
-  // ============================================================================
+  // 3. COMPARATIVO MÊS A MÊS (Mantido igual)
   export async function getWorkspaceCategoryComparison() {
       const { user } = await validateUser();
       if (!user) return [];
@@ -252,8 +250,7 @@ export async function getTenantDebtXRayData(filterWorkspaceId?: string) {
   }
   
   // ============================================================================
-  // 4. ÍNDICE DE SAÚDE FINANCEIRA
-  // ============================================================================
+  // 4. ÍNDICE DE SAÚDE FINANCEIRA (Mantido igual)
   export async function getTenantHealthScore(filterWorkspaceId?: string) {
       const { user } = await validateUser('org_view');
       if (!user) return { score: 0, metrics: {} };

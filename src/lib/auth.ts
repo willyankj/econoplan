@@ -11,44 +11,52 @@ export const authOptions: NextAuthOptions = {
   adapter: {
     ...PrismaAdapter(prisma),
     createUser: async (data: any) => {
-      const tenantName = `${data.name?.split(' ')[0]}'s Organization` || "Minha Organização";
-      const slug = `${tenantName.toLowerCase().replace(/\s+/g, '-')}-${crypto.randomUUID().split('-')[0]}`;
+      // Nome seguro: garante que não quebre se o Google não enviar nome
+      const safeName = data.name || "Usuário";
+      const tenantName = `${safeName.split(' ')[0]}'s Organization`;
+      const slug = `${tenantName.toLowerCase().replace(/[^a-z0-9]/g, '-')}-${crypto.randomUUID().split('-')[0]}`;
 
-      const tenant = await prisma.tenant.create({
-        data: {
-          name: tenantName,
-          slug: slug,
-          subscriptionStatus: "INACTIVE",
-          planType: "FREE"
-        }
-      });
-
-      const user = await prisma.user.create({
-        data: {
-          ...data,
-          tenantId: tenant.id,
-          role: 'OWNER',
-          lastLogin: new Date()
-        }
-      });
-
-      await prisma.workspace.create({
-        data: {
-          name: "Principal",
-          tenantId: tenant.id,
-          members: { create: { userId: user.id, role: 'ADMIN' } },
-          bankAccounts: { create: { name: "Carteira", bank: "Dinheiro", balance: 0 } },
-          categories: {
-            createMany: {
-              data: [
-                { name: "Salário", type: "INCOME" },
-                { name: "Alimentação", type: "EXPENSE" },
-                { name: "Moradia", type: "EXPENSE" },
-                { name: "Transporte", type: "EXPENSE" },
-              ]
+      // ATOMICIDADE: Garante que User, Tenant e Workspace nasçam juntos.
+      const user = await prisma.$transaction(async (tx) => {
+          const tenant = await tx.tenant.create({
+            data: {
+              name: tenantName,
+              slug: slug,
+              subscriptionStatus: "INACTIVE",
+              planType: "FREE"
             }
-          }
-        }
+          });
+
+          const newUser = await tx.user.create({
+            data: {
+              ...data,
+              tenantId: tenant.id,
+              role: 'OWNER',
+              lastLogin: new Date()
+            }
+          });
+
+          await tx.workspace.create({
+            data: {
+              name: "Principal",
+              tenantId: tenant.id,
+              members: { create: { userId: newUser.id, role: 'ADMIN' } },
+              bankAccounts: { create: { name: "Carteira", bank: "Dinheiro", balance: 0, isIncluded: true } },
+              categories: {
+                createMany: {
+                  data: [
+                    { name: "Salário", type: "INCOME", icon: "Banknote", color: "#10b981" },
+                    { name: "Alimentação", type: "EXPENSE", icon: "Utensils", color: "#f43f5e" },
+                    { name: "Moradia", type: "EXPENSE", icon: "Home", color: "#3b82f6" },
+                    { name: "Transporte", type: "EXPENSE", icon: "Car", color: "#f59e0b" },
+                    { name: "Lazer", type: "EXPENSE", icon: "PartyPopper", color: "#8b5cf6" },
+                  ]
+                }
+              }
+            }
+          });
+
+          return newUser;
       });
 
       return user;
@@ -57,7 +65,7 @@ export const authOptions: NextAuthOptions = {
 
   session: {
     strategy: "jwt",
-    maxAge: 6 * 60 * 60, // 6 horas (em segundos). Força a expiração do token.
+    maxAge: 6 * 60 * 60, // 6 horas
   },
 
   providers: [
@@ -78,8 +86,6 @@ export const authOptions: NextAuthOptions = {
     async signIn({ user, profile }) {
       if (user.email) {
         try {
-          // Verifica se o usuário JÁ EXISTE antes de tentar atualizar.
-          // Se não existir, não faz nada (o createUser lá em cima vai cuidar dele).
           const existingUser = await prisma.user.findUnique({ 
             where: { email: user.email } 
           });
@@ -97,7 +103,6 @@ export const authOptions: NextAuthOptions = {
           }
         } catch (error) {
           console.error("Erro ao processar login:", error);
-          // Não bloqueia o login mesmo se der erro na atualização
         }
       }
       return true;
@@ -109,9 +114,10 @@ export const authOptions: NextAuthOptions = {
       }
 
       if (token.email) {
+         // Otimização: Select apenas nos campos necessários
          const dbUser = await prisma.user.findUnique({
             where: { email: token.email as string },
-            include: { tenant: true }
+            select: { tenantId: true, role: true, tenant: { select: { subscriptionStatus: true, nextPayment: true } } }
          });
          
          if (dbUser) {

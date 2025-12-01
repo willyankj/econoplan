@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import MercadoPagoConfig, { Payment } from 'mercadopago';
 import { prisma } from "@/lib/prisma";
 import crypto from 'crypto';
+import { addMonths } from "date-fns";
 
 // MODO PRODUÇÃO
 const client = new MercadoPagoConfig({ 
@@ -18,7 +19,6 @@ export async function POST(request: Request) {
         const id = url.searchParams.get("id") || url.searchParams.get("data.id");
 
         // 1. VALIDAÇÃO DE ASSINATURA (HMAC)
-        // Se o segredo estiver configurado, validamos a origem
         if (WEBHOOK_SECRET) {
             const xSignature = request.headers.get("x-signature");
             const xRequestId = request.headers.get("x-request-id");
@@ -27,7 +27,6 @@ export async function POST(request: Request) {
                 return NextResponse.json({ error: "Missing signature headers" }, { status: 401 });
             }
 
-            // Extrai ts e v1 da assinatura (formato: ts=...;v1=...)
             const parts = xSignature.split(';');
             let ts = '';
             let hash = '';
@@ -38,10 +37,7 @@ export async function POST(request: Request) {
                 if (key === 'v1') hash = value;
             });
 
-            // Cria o manifesto para assinar
             const manifest = `id:${id};request-id:${xRequestId};ts:${ts};`;
-
-            // Gera o hash esperado
             const hmac = crypto.createHmac('sha256', WEBHOOK_SECRET);
             const digest = hmac.update(manifest).digest('hex');
 
@@ -72,16 +68,14 @@ export async function POST(request: Request) {
                         if (tenant) {
                             const today = new Date();
                             let baseDate = today;
+                            
+                            // Se já tem data futura paga, soma a partir dela
                             if (tenant.nextPayment && new Date(tenant.nextPayment) > today) {
                                 baseDate = new Date(tenant.nextPayment);
                             }
 
-                            const nextPayment = new Date(baseDate);
-                            nextPayment.setMonth(nextPayment.getMonth() + 1);
-
-                            if (nextPayment.getDate() !== baseDate.getDate()) {
-                                nextPayment.setDate(0); 
-                            }
+                            // CORREÇÃO: Uso de addMonths para consistência e segurança
+                            const nextPayment = addMonths(baseDate, 1);
 
                             await prisma.tenant.update({
                                 where: { id: tenantId },

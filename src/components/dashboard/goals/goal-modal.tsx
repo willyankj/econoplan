@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Target, Loader2, Plus, Pencil, Users, PieChart, RefreshCw, Link as LinkIcon, Calendar } from "lucide-react";
+import { Target, Loader2, Plus, Pencil, Users, PieChart, RefreshCw, Link as LinkIcon, Calendar, AlertCircle, CheckCircle2 } from "lucide-react";
 import { upsertGoal } from '@/app/dashboard/actions';
 import { toast } from "sonner";
 import { BankLogo } from "@/components/ui/bank-logo";
@@ -61,10 +61,11 @@ export function GoalModal({ goal, isShared = false, workspaces = [], accounts = 
   };
 
   const totalPercentage = Object.entries(rules).filter(([key]) => selectedIds.includes(key)).reduce((acc, [, val]) => acc + val, 0);
+  const isTotalValid = totalPercentage === 100;
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (isShared && totalPercentage !== 100) return toast.error(`A soma das porcentagens deve ser 100%`);
+    if (isShared && totalPercentage !== 100) return toast.error(`A soma das porcentagens deve ser 100%. Atualmente: ${totalPercentage}%`);
     if (isShared && selectedIds.length === 0) return toast.error("Selecione pelo menos um participante.");
 
     setIsLoading(true);
@@ -182,7 +183,13 @@ export function GoalModal({ goal, isShared = false, workspaces = [], accounts = 
                     <div className="border-t border-border pt-4">
                         <div className="flex items-center justify-between mb-3">
                             <Label className="text-purple-500 font-bold text-xs flex items-center gap-1"><PieChart className="w-3 h-3" /> Divisão</Label>
-                            <button type="button" onClick={() => distributeEvenly(selectedIds)} className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 bg-muted/50 px-2 py-1 rounded"><RefreshCw className="w-3 h-3" /> Distribuir Igual</button>
+                            <div className="flex items-center gap-2">
+                                <div className={`text-xs font-bold px-2 py-0.5 rounded-full flex items-center gap-1 ${isTotalValid ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>
+                                    {isTotalValid ? <CheckCircle2 className="w-3 h-3" /> : <AlertCircle className="w-3 h-3" />}
+                                    Total: {totalPercentage}%
+                                </div>
+                                <button type="button" onClick={() => distributeEvenly(selectedIds)} className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 bg-muted/50 px-2 py-1 rounded"><RefreshCw className="w-3 h-3" /> Distribuir Igual</button>
+                            </div>
                         </div>
                         <div className="space-y-2 bg-muted/30 p-2 rounded-lg border border-border max-h-[150px] overflow-y-auto">
                             {workspaces.map(ws => {

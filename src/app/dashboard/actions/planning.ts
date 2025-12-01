@@ -18,7 +18,7 @@ const GoalSchema = z.object({
     deadline: z.string().optional().nullable(),
     currentAmount: z.coerce.number().optional(),
     contributionRules: z.string().optional(),
-    linkedAccountId: z.string().optional().nullable() // <--- NOVO CAMPO NO SCHEMA
+    linkedAccountId: z.string().optional().nullable()
 });
 
 // === ORÇAMENTOS ===
@@ -70,7 +70,6 @@ export async function upsertGoal(formData: FormData, id?: string, isShared = fal
   const parsed = GoalSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { error: "Dados inválidos" };
   
-  // Extrai o novo campo linkedAccountId
   const { name, targetAmount, deadline, currentAmount, contributionRules: rulesString, linkedAccountId } = parsed.data;
 
   let contributionRules = null;
@@ -83,7 +82,7 @@ export async function upsertGoal(formData: FormData, id?: string, isShared = fal
     targetAmount,
     deadline: deadline ? new Date(deadline) : null,
     contributionRules: contributionRules ?? undefined,
-    linkedAccountId: linkedAccountId === "none" ? null : linkedAccountId // Salva o vínculo ou remove se for "none"
+    linkedAccountId: linkedAccountId === "none" ? null : linkedAccountId
   };
 
   if (id) {
@@ -133,12 +132,33 @@ export async function moveMoneyGoal(goalId: string, amount: number, accountId: s
     const { user, error } = await validateUser();
     if (error || !user) return { error };
 
+    // Validar valores negativos ou zero
+    if (amount <= 0) return { error: "Valor inválido" };
+
     const goal = await prisma.goal.findUnique({ where: { id: goalId } });
     const account = await prisma.bankAccount.findUnique({ where: { id: accountId } });
+    
     if (!goal || !account) return { error: "Dados inválidos" };
+
+    // CORREÇÃO: Isolamento de Workspace
+    // Garante que a conta e a meta pertencem ao mesmo workspace para evitar vazamento de dados
+    if (goal.workspaceId && account.workspaceId !== goal.workspaceId) {
+        return { error: "A conta e a meta devem pertencer ao mesmo workspace." };
+    }
 
     const isDeposit = type === 'DEPOSIT';
     const txType = isDeposit ? "EXPENSE" : "INCOME";
+    
+    // CORREÇÃO: Validação de Saldo (Evita "Dinheiro Infinito")
+    if (isDeposit) {
+        if (Number(account.balance) < amount) {
+            return { error: "Saldo insuficiente na conta." };
+        }
+    } else {
+        if (Number(goal.currentAmount) < amount) {
+            return { error: "Saldo insuficiente na meta." };
+        }
+    }
     
     const categoryName = isDeposit ? "Metas" : "Resgate de Metas";
     const categoryIcon = isDeposit ? "PiggyBank" : "Wallet";
@@ -161,25 +181,29 @@ export async function moveMoneyGoal(goalId: string, amount: number, accountId: s
         } 
     });
 
-    await prisma.$transaction([
-        prisma.transaction.create({
-            data: { 
-                description: `${isDeposit ? 'Depósito Meta' : 'Resgate Meta'}: ${goal.name}`, 
-                amount, 
-                type: txType, 
-                date: new Date(), 
-                workspaceId: account.workspaceId, 
-                bankAccountId: accountId, 
-                goalId, 
-                isPaid: true, 
-                categoryId: category.id 
-            }
-        }),
-        prisma.bankAccount.update({ where: { id: accountId }, data: { balance: isDeposit ? { decrement: amount } : { increment: amount } } }),
-        prisma.goal.update({ where: { id: goalId }, data: { currentAmount: isDeposit ? { increment: amount } : { decrement: amount } } })
-    ]);
+    try {
+        await prisma.$transaction([
+            prisma.transaction.create({
+                data: { 
+                    description: `${isDeposit ? 'Depósito Meta' : 'Resgate Meta'}: ${goal.name}`, 
+                    amount, 
+                    type: txType, 
+                    date: new Date(), 
+                    workspaceId: account.workspaceId, 
+                    bankAccountId: accountId, 
+                    goalId, 
+                    isPaid: true, 
+                    categoryId: category.id 
+                }
+            }),
+            prisma.bankAccount.update({ where: { id: accountId }, data: { balance: isDeposit ? { decrement: amount } : { increment: amount } } }),
+            prisma.goal.update({ where: { id: goalId }, data: { currentAmount: isDeposit ? { increment: amount } : { decrement: amount } } })
+        ]);
 
-    await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'ACTION', entity: 'Goal', entityId: goalId, details: `${isDeposit ? 'Guardou' : 'Resgatou'} R$ ${amount} em ${goal.name}` });
+        await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'ACTION', entity: 'Goal', entityId: goalId, details: `${isDeposit ? 'Guardou' : 'Resgatou'} R$ ${amount} em ${goal.name}` });
+    } catch(e) {
+        return { error: "Erro ao processar movimentação." };
+    }
 
     revalidatePath('/dashboard/goals'); 
     revalidatePath('/dashboard/accounts');
@@ -188,7 +212,6 @@ export async function moveMoneyGoal(goalId: string, amount: number, accountId: s
     return { success: true };
 }
 
-// ... (Funções de notificação mantêm iguais)
 export async function getNotifications() {
     const { user } = await validateUser();
     if (!user) return [];
@@ -214,18 +237,21 @@ export async function checkDeadlinesAndSendAlerts() {
     alertDate.setDate(today.getDate() + 5);
     const alertDay = alertDate.getDate();
     
+    // Otimização: Selecionar apenas o necessário
     const cardsDue = await prisma.creditCard.findMany({ 
         where: { dueDay: alertDay }, 
-        include: { workspace: true } 
+        select: { name: true, workspace: { select: { tenantId: true } } }
     });
     
     let count = 0;
     
     for (const card of cardsDue) {
         const users = await prisma.user.findMany({ 
-            where: { tenantId: card.workspace.tenantId } 
+            where: { tenantId: card.workspace.tenantId },
+            select: { id: true } 
         });
 
+        // Batch notifications seria ideal aqui, mas loop simples funciona para cargas baixas
         for (const u of users) {
             await notifyInvoiceDue(u.id, card.name, alertDay);
             count++;

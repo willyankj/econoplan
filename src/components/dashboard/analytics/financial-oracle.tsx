@@ -1,7 +1,7 @@
 'use client';
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ResponsiveContainer, ComposedChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine } from 'recharts';
+import { ResponsiveContainer, ComposedChart, Area, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, Legend } from 'recharts';
 import { formatCurrency } from "@/lib/utils";
 import { Sparkles } from "lucide-react";
 import { InfoHelp } from "@/components/dashboard/info-help"; 
@@ -10,14 +10,16 @@ export function FinancialOracle({ data }: { data: any[] }) {
   
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
+      // Encontra o payload correto independente da ordem (Bar ou Area)
+      const dataPoint = payload[0].payload;
       return (
         <div className="bg-popover border border-border p-3 rounded-lg shadow-xl text-xs">
           <p className="font-bold mb-2 text-foreground">{label}</p>
           <div className="space-y-1">
-             <p className="text-emerald-500">Entradas: {formatCurrency(payload[0]?.payload.income)}</p>
-             <p className="text-rose-500">Saídas: {formatCurrency(payload[0]?.payload.expense)}</p>
+             <p className="text-emerald-500">Entradas: {formatCurrency(dataPoint.income)}</p>
+             <p className="text-rose-500">Saídas: {formatCurrency(dataPoint.expense)}</p>
              <div className="border-t border-border my-1 pt-1">
-                 <p className="font-bold text-foreground">Saldo Previsto: {formatCurrency(payload[0]?.value)}</p>
+                 <p className="font-bold text-foreground">Saldo Previsto: {formatCurrency(dataPoint.balance)}</p>
              </div>
           </div>
         </div>
@@ -46,13 +48,13 @@ export function FinancialOracle({ data }: { data: any[] }) {
                                     <p>O cálculo leva em consideração:</p>
                                     <ul className="list-disc pl-4 space-y-1 text-xs text-muted-foreground">
                                         <li>
-                                            <strong className="text-foreground">Entradas:</strong> Receitas recorrentes (ex: Salários) + Lançamentos futuros agendados.
+                                            <strong className="text-foreground">Entradas (Barras Verdes):</strong> Receitas recorrentes (ex: Salários) + Lançamentos futuros agendados.
                                         </li>
                                         <li>
-                                            <strong className="text-foreground">Saídas:</strong> Contas fixas mensais + Parcelas futuras de cartão de crédito + Despesas agendadas.
+                                            <strong className="text-foreground">Saídas (Barras Vermelhas):</strong> Contas fixas mensais + Parcelas futuras de cartão + Despesas agendadas.
                                         </li>
                                         <li>
-                                            <strong className="text-foreground">Saldo Previsto:</strong> Saldo atual acumulado com a movimentação prevista mês a mês.
+                                            <strong className="text-foreground">Linha de Saldo:</strong> Saldo atual acumulado com a movimentação prevista mês a mês.
                                         </li>
                                     </ul>
                                 </div>
@@ -84,7 +86,12 @@ export function FinancialOracle({ data }: { data: any[] }) {
                         
                         <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="3 3" />
 
-                        <Area type="monotone" dataKey="balance" stroke="#8b5cf6" strokeWidth={3} fillOpacity={1} fill="url(#colorBalance)" />
+                        {/* Barras de Fluxo (Fundo) */}
+                        <Bar dataKey="income" name="Entradas" fill="#10b981" radius={[4, 4, 0, 0]} barSize={12} fillOpacity={0.4} />
+                        <Bar dataKey="expense" name="Saídas" fill="#f43f5e" radius={[4, 4, 0, 0]} barSize={12} fillOpacity={0.4} />
+
+                        {/* Linha de Saldo (Frente) */}
+                        <Area type="monotone" dataKey="balance" name="Saldo" stroke="#8b5cf6" strokeWidth={3} fillOpacity={1} fill="url(#colorBalance)" />
                     </ComposedChart>
                 </ResponsiveContainer>
              )}

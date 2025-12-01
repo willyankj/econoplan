@@ -5,11 +5,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"; // Corrigido para Select do shadcn
-import { PieChart, Plus, Loader2, Pencil } from "lucide-react"; // Ícones atualizados
+import { PieChart, Plus, Loader2, Pencil } from "lucide-react"; 
 import { upsertBudget } from '@/app/dashboard/actions';
 import { toast } from "sonner";
-// Se tiver o componente de CategoryCombobox, pode usar, mas vou usar Select simples para manter consistência
 import { CategoryCombobox } from "@/components/dashboard/categories/category-combobox"; 
 
 interface BudgetModalProps {
@@ -84,10 +82,10 @@ export function BudgetModal({ budget, categories }: BudgetModalProps) {
             <div className="p-6 space-y-5">
                 <div className="grid gap-1.5">
                     <Label className="text-xs text-muted-foreground ml-1">Categoria do Orçamento</Label>
-                    {/* Se estiver editando, não permite trocar a categoria para evitar conflitos, ou use hidden input */}
+                    {/* Se estiver editando, mostramos o nome. Se faltar nome, mostra fallback para não ficar vazio */}
                     {isEditing ? (
                         <div className="flex items-center h-11 px-3 w-full rounded-md bg-muted/50 border border-transparent text-sm text-foreground font-medium">
-                            {budget.categoryName || budget.category?.name}
+                            {budget.categoryName || budget.category?.name || "Categoria Indisponível"}
                             <input type="hidden" name="categoryId" value={budget.categoryId} />
                         </div>
                     ) : (

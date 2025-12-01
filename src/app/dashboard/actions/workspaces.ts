@@ -64,6 +64,12 @@ export async function deleteWorkspace(workspaceId: string) {
   const { user, error } = await validateUser('org_manage_workspaces');
   if (error || !user) return { error };
 
+  // Prevenir exclusão do último workspace para não quebrar a UI
+  const totalWorkspaces = await prisma.workspace.count({ where: { tenantId: user.tenantId } });
+  if (totalWorkspaces <= 1) {
+      return { error: "Você não pode excluir o único workspace da organização." };
+  }
+
   try {
     await prisma.$transaction(async (tx) => {
         await tx.transaction.deleteMany({ where: { workspaceId } });
@@ -99,20 +105,31 @@ export async function inviteMember(formData: FormData) {
 
   const targetWorkspace = await prisma.workspace.findUnique({ where: { id: workspaceId } });
   if (!targetWorkspace) return { error: "Workspace inválido." };
+  
+  // Segurança: Garante que o workspace pertence ao tenant do usuário atual
+  if (targetWorkspace.tenantId !== currentUser.tenantId) return { error: "Acesso negado." };
 
   let targetUserId = "";
   const existingUser = await prisma.user.findUnique({ where: { email } });
 
   if (existingUser) {
+    // CORREÇÃO DE SEGURANÇA: Impedir sequestro de usuários de outras organizações
+    if (existingUser.tenantId !== currentUser.tenantId) {
+        return { error: "Este usuário já pertence a outra organização." };
+    }
+
     targetUserId = existingUser.id;
+    
+    // Apenas adiciona ao workspace e atualiza role, sem mudar tenantId
     await prisma.user.update({
       where: { email },
       data: { 
-        tenantId: currentUser.tenantId, role: role as any, 
+        role: role as any, 
         workspaces: { connectOrCreate: { where: { userId_workspaceId: { userId: existingUser.id, workspaceId } }, create: { workspaceId, role: 'MEMBER' } } }
       }
     });
   } else {
+    // Cria novo usuário já vinculado ao tenant correto
     const newUser = await prisma.user.create({
       data: { email, tenantId: currentUser.tenantId, role: role as any, name: "Convidado", workspaces: { create: { workspaceId, role: 'MEMBER' } } }
     });
@@ -137,7 +154,12 @@ export async function removeMember(userId: string) {
     const { user, error } = await validateUser('org_invite');
     if (error || !user) return { error };
 
+    // Não permite remover a si mesmo por aqui para evitar lockout acidental
+    if (userId === user.id) return { error: "Use a opção de sair da organização." };
+
     const targetUser = await prisma.user.findUnique({ where: { id: userId } });
+    if (!targetUser || targetUser.tenantId !== user.tenantId) return { error: "Usuário não encontrado ou externo." };
+
     await prisma.user.delete({ where: { id: userId } });
     
     await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'DELETE', entity: 'Member', details: `Removeu usuário ${targetUser?.email || userId}` });
@@ -155,6 +177,8 @@ export async function updateMemberRole(userId: string, formData: FormData) {
   const newRole = parsed.data.role;
   const targetUser = await prisma.user.findUnique({ where: { id: userId } });
   
+  if (!targetUser || targetUser.tenantId !== user.tenantId) return { error: "Usuário inválido." };
+
   await prisma.user.update({ where: { id: userId }, data: { role: newRole as any } });
   
   await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'UPDATE', entity: 'Member', details: `Alterou cargo de ${targetUser?.email} para ${newRole}` });
@@ -168,9 +192,17 @@ export async function toggleWorkspaceAccess(userId: string, workspaceId: string,
 
   const targetUser = await prisma.user.findUnique({ where: { id: userId } });
   const targetWs = await prisma.workspace.findUnique({ where: { id: workspaceId } });
+  
+  if (!targetWs || targetWs.tenantId !== user.tenantId) return { error: "Workspace inválido." };
+  if (!targetUser || targetUser.tenantId !== user.tenantId) return { error: "Usuário inválido." };
 
   if (hasAccess) {
-    await prisma.workspaceMember.create({ data: { userId, workspaceId, role: 'MEMBER' } });
+    // connectOrCreate evita erro de chave duplicada se já existir
+    await prisma.workspaceMember.upsert({
+        where: { userId_workspaceId: { userId, workspaceId } },
+        update: {},
+        create: { userId, workspaceId, role: 'MEMBER' }
+    });
   } else {
     const count = await prisma.workspaceMember.count({ where: { userId } });
     if (count <= 1) return { error: "Usuário precisa ter pelo menos 1 workspace." };
@@ -193,7 +225,7 @@ export async function updateTenantName(formData: FormData) {
     const { user, error } = await validateUser('org_manage_workspaces');
     if (error || !user) return { error };
     
-    const parsed = WorkspaceSchema.safeParse(Object.fromEntries(formData)); // Reutilizando schema de nome
+    const parsed = WorkspaceSchema.safeParse(Object.fromEntries(formData)); 
     if(!parsed.success) return { error: "Nome inválido" };
 
     const name = parsed.data.name;

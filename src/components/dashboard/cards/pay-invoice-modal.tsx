@@ -6,14 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CreditCard, Loader2, Calendar as CalendarIcon } from "lucide-react";
+import { CreditCard, Loader2, Calendar as CalendarIcon, AlertTriangle } from "lucide-react";
 import { payCreditCardInvoice } from '@/app/dashboard/actions';
 import { toast } from "sonner";
 import { BankLogo } from "@/components/ui/bank-logo";
 import { formatCurrency } from "@/lib/utils";
 
 interface PayInvoiceModalProps {
-  // Correção: Garantir que card não seja undefined
   card: { id: string; name: string; bank: string };
   totalAmount: number;
   accounts: any[];
@@ -30,6 +29,7 @@ export function PayInvoiceModal({ card, totalAmount, accounts }: PayInvoiceModal
     
     const formData = new FormData(event.currentTarget);
     formData.set('date', date);
+    formData.set('amount', totalAmount.toString()); // Força envio do valor exato
     
     const result = await payCreditCardInvoice(formData);
     setIsLoading(false);
@@ -46,13 +46,11 @@ export function PayInvoiceModal({ card, totalAmount, accounts }: PayInvoiceModal
   const themeBg = "bg-rose-500";
   const themeLightBg = "bg-rose-50 dark:bg-rose-950/20";
 
-  // Se card não existir (erro de dados), não renderiza nada para não quebrar a página
   if (!card) return null;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        {/* CORREÇÃO VISUAL: shrink-0 impede que o botão seja esmagado */}
         <Button 
             variant="outline" 
             size="sm" 
@@ -75,17 +73,18 @@ export function PayInvoiceModal({ card, totalAmount, accounts }: PayInvoiceModal
                 <div className="relative flex justify-center items-center">
                     <span className={`text-2xl font-medium mr-2 opacity-50 ${themeColor}`}>R$</span>
                     <Input 
-                        name="amount" 
-                        type="number" 
-                        step="0.01" 
-                        placeholder="0,00" 
-                        defaultValue={totalAmount}
-                        className={`text-5xl font-bold text-center border-none shadow-none bg-transparent focus-visible:ring-0 h-16 w-full placeholder:text-muted-foreground/30 ${themeColor} [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
-                        autoFocus
-                        required 
+                        name="amount_display" 
+                        type="text"
+                        value={totalAmount.toFixed(2)}
+                        readOnly
+                        disabled
+                        className={`text-5xl font-bold text-center border-none shadow-none bg-transparent focus-visible:ring-0 h-16 w-full placeholder:text-muted-foreground/30 ${themeColor} cursor-not-allowed`}
                     />
                 </div>
-                <p className="text-center text-xs text-muted-foreground mt-2">Valor total da fatura em aberto</p>
+                <div className="flex items-center justify-center gap-1 mt-2 text-rose-600/80 bg-rose-100/50 py-1 px-3 rounded-full w-fit mx-auto">
+                   <AlertTriangle className="w-3 h-3" />
+                   <p className="text-[10px] font-medium">Pagamento parcial indisponível</p>
+                </div>
             </div>
 
             <div className="p-6 space-y-5">

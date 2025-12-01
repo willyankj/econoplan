@@ -2,7 +2,7 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { InfoHelp } from "@/components/dashboard/info-help"; // Importar
+import { InfoHelp } from "@/components/dashboard/info-help"; 
 
 const currency = (val: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
 const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899', '#6366f1'];
@@ -49,7 +49,8 @@ export function TenantOverviewCharts({ workspaceData, categoryData }: TenantChar
             <BarChart data={sortedWorkspaces} layout="vertical" margin={{ left: 0, right: 30 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false} />
               <XAxis type="number" hide />
-              <YAxis dataKey="name" type="category" width={100} tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }} tickLine={false} axisLine={false} />
+              {/* Aumentado width de 100 para 140 para caber nomes maiores */}
+              <YAxis dataKey="name" type="category" width={140} tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }} tickLine={false} axisLine={false} />
               <Tooltip content={<CustomTooltip />} cursor={{ fill: 'hsl(var(--muted)/0.2)' }} />
               <Bar dataKey="expense" name="Despesas" fill="#f43f5e" radius={[0, 4, 4, 0]} barSize={20} />
               <Bar dataKey="income" name="Receitas" fill="#10b981" radius={[0, 4, 4, 0]} barSize={20} />

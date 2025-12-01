@@ -15,6 +15,13 @@ interface RecurringModalProps {
   transactions: any[];
 }
 
+const FREQUENCY_MAP: Record<string, string> = {
+    'MONTHLY': 'Mensal',
+    'WEEKLY': 'Semanal',
+    'YEARLY': 'Anual',
+    'DAILY': 'Diário'
+};
+
 export function RecurringModal({ transactions }: RecurringModalProps) {
   const [open, setOpen] = useState(false);
   const [loadingId, setLoadingId] = useState<string | null>(null);
@@ -28,7 +35,7 @@ export function RecurringModal({ transactions }: RecurringModalProps) {
           toast.error(result.error);
       } else {
           toast.success("Recorrência encerrada com sucesso!");
-          router.refresh(); // Atualiza a lista
+          router.refresh(); 
       }
       setLoadingId(null);
   };
@@ -87,7 +94,8 @@ export function RecurringModal({ transactions }: RecurringModalProps) {
                                 </TableCell>
                                 <TableCell>
                                     <Badge variant="outline" className="text-xs font-normal">
-                                        {t.frequency === 'MONTHLY' ? 'Mensal' : t.frequency}
+                                        {/* CORREÇÃO: Uso do mapa de tradução */}
+                                        {FREQUENCY_MAP[t.frequency] || t.frequency}
                                     </Badge>
                                 </TableCell>
                                 <TableCell className="text-muted-foreground text-sm">

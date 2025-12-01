@@ -12,7 +12,6 @@ const client = new MercadoPagoConfig({
     options: { timeout: 10000 } 
 });
 
-// --- Função de verificação do banco (Mantida) ---
 export async function checkSubscriptionStatus() {
     const session = await getServerSession(authOptions);
     if (!session?.user?.email) return null;
@@ -40,37 +39,35 @@ export async function createCheckoutSession() {
   if (!user) return;
 
   const preference = new Preference(client);
-  const baseUrl = "https://econoplan.cloud";
+  
+  // CORREÇÃO: URL Dinâmica para permitir testes em localhost
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
   
   try {
     const response = await preference.create({
       body: {
         items: [
           {
-            id: "plano-teste-1real",
-            title: "Assinatura Econoplan (Teste 1 Real)",
+            id: "plano-mensal-pro", // ID interno do produto
+            title: "Assinatura Econoplan PRO (Mensal)",
             quantity: 1,
-            unit_price: 1.00, 
+            unit_price: 29.90, // Ajuste para o valor real quando for pra produção
             currency_id: 'BRL'
           }
         ],
         payer: {
             email: user.email,
             name: user.name || 'Cliente',
-            // Não enviamos sobrenome ou endereço para forçar o MP a pedir os dados necessários (CPF)
         },
         back_urls: {
-            success: `${baseUrl}/plans?status=approved`, // Mudamos para /plans para o script da página capturar
+            success: `${baseUrl}/plans?status=approved`, 
             failure: `${baseUrl}/plans?status=failure`,
             pending: `${baseUrl}/plans?status=pending`
         },
         auto_return: "approved",
         external_reference: user.tenantId,
         statement_descriptor: "ECONOPLAN",
-        binary_mode: true, // Força aprovação instantânea (bom para Pix)
-        
-        // Removemos restrições de métodos de pagamento para evitar bugs visuais
-        // O MP vai mostrar tudo o que sua conta aceita (Pix, Cartão, Boleto, etc)
+        binary_mode: true, 
       }
     });
 
