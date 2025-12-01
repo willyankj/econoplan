@@ -8,7 +8,7 @@ import { z } from "zod";
 import { v4 as uuidv4 } from 'uuid';
 import { notifyBudgetExceeded, notifyBudgetWarning } from "@/lib/notifications";
 import { createHash } from "crypto";
-import { addDays, differenceInDays, addMonths } from "date-fns"; // <--- AQUI ESTAVA O PROBLEMA (IMPORT CORRIGIDO)
+import { addDays, differenceInDays, addMonths } from "date-fns";
 
 // --- UTILITÁRIO DE HASH SERVER-SIDE ---
 function generateTransactionHash(date: Date, amount: number, description: string): string {
@@ -204,17 +204,27 @@ export async function upsertTransaction(formData: FormData, id?: string) {
           if (isInstallment && cardId) {
               const installmentGroupId = uuidv4();
               const totalInstallments = installments || 1;
-              const installmentValue = amount; 
+              const installmentValue = amount / totalInstallments; // <--- CORREÇÃO 1: Divisão do valor
 
               for (let i = 0; i < totalInstallments; i++) {
-                  const installmentDate = new Date(baseDate);
-                  installmentDate.setMonth(baseDate.getMonth() + i);
+                  // <--- CORREÇÃO 2: addMonths para corrigir o bug de data
+                  const installmentDate = addMonths(baseDate, i); 
 
                   await tx.transaction.create({
                       data: {
                           description: `${description} (${i + 1}/${totalInstallments})`,
-                          amount: installmentValue, type, date: installmentDate, workspaceId, creditCardId: cardId, categoryId: catId, isPaid: false,
-                          isInstallment: true, installmentId: installmentGroupId, installmentCurrent: i + 1, installmentTotal: totalInstallments, frequency: 'MONTHLY'
+                          amount: installmentValue, 
+                          type, 
+                          date: installmentDate, 
+                          workspaceId, 
+                          creditCardId: cardId, 
+                          categoryId: catId, 
+                          isPaid: false,
+                          isInstallment: true, 
+                          installmentId: installmentGroupId, 
+                          installmentCurrent: i + 1, 
+                          installmentTotal: totalInstallments, 
+                          frequency: 'MONTHLY'
                       }
                   });
               }
@@ -392,7 +402,6 @@ export async function getRecurringTransactions() {
   }));
 }
 
-// --- NOVA FUNÇÃO: PRÓXIMOS VENCIMENTOS ---
 export async function getUpcomingBills() {
   const { user, error } = await validateUser();
   if (error || !user) return [];
@@ -403,13 +412,27 @@ export async function getUpcomingBills() {
   const limitDate = addDays(today, 30); 
 
   const bills = await prisma.transaction.findMany({
-    where: { workspaceId, type: 'EXPENSE', isPaid: false, creditCardId: null, date: { lte: limitDate } },
+    where: { 
+        workspaceId, 
+        type: 'EXPENSE', 
+        isPaid: false, 
+        creditCardId: null, 
+        date: { lte: limitDate } // <--- FILTRO DE DATA
+    },
     orderBy: { date: 'asc' }, take: 10, include: { category: true }
   });
 
   const cards = await prisma.creditCard.findMany({
     where: { workspaceId },
-    include: { transactions: { where: { isPaid: false, type: 'EXPENSE' } } }
+    include: { 
+      transactions: { 
+        where: { 
+          isPaid: false, 
+          type: 'EXPENSE',
+          date: { lte: limitDate } // <--- FILTRO DE DATA TAMBÉM NAS TRANSAÇÕES DO CARTÃO
+        } 
+      } 
+    }
   });
 
   const cardBills = cards.map(card => {
@@ -417,7 +440,6 @@ export async function getUpcomingBills() {
     const currentMonth = today.getMonth();
     let dueDate = new Date(currentYear, currentMonth, card.dueDay);
     
-    // IMPORTANTE: Usa differenceInDays para calcular se a fatura já virou
     if (differenceInDays(today, dueDate) > 20) { dueDate = addMonths(dueDate, 1); }
     
     const total = card.transactions.reduce((acc, t) => acc + Number(t.amount), 0);
