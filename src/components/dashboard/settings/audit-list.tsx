@@ -17,45 +17,23 @@ interface AuditLog {
   user: { email: string };
 }
 
-const ACTION_MAP: Record<string, string> = {
-  CREATE: "Criação",
-  UPDATE: "Edição",
-  DELETE: "Exclusão",
-  LOGIN: "Login",
-  ACTION: "Ação"
-};
-
-const ENTITY_MAP: Record<string, string> = {
-  Transaction: "Transação",
-  Account: "Conta",
-  Card: "Cartão",
-  Budget: "Orçamento",
-  Goal: "Meta",
-  Member: "Membro",
-  Workspace: "Workspace",
-  Tenant: "Organização",
-  Permissions: "Permissões",
-  Access: "Acesso"
-};
-
-export function AuditList({ logs }: { logs: AuditLog[] }) {
+// VALOR PADRÃO: logs = []
+export function AuditList({ logs = [] }: { logs: AuditLog[] }) {
   
+  // Redundância de segurança
+  const safeLogs = Array.isArray(logs) ? logs : [];
+
   const getLink = (log: AuditLog) => {
     if (log.action === 'DELETE') return null;
-
     switch (log.entity) {
         case 'Transaction':
             const match = log.details?.match(/:\s(.*?)\s\(/); 
             const query = match ? match[1] : "";
             return `/dashboard/transactions?q=${encodeURIComponent(query)}`;
-        
         case 'Budget': return `/dashboard/budgets`;
         case 'Goal': return `/dashboard/goals`;
         case 'Card': return `/dashboard/cards`;
         case 'Account': return `/dashboard/accounts`;
-        case 'Member':
-        case 'Access':
-        case 'Permissions': return `/dashboard/settings`; 
         default: return null;
     }
   };
@@ -67,67 +45,50 @@ export function AuditList({ logs }: { logs: AuditLog[] }) {
             <ScrollText className="w-5 h-5 text-blue-500" />
             Registro de Auditoria
         </CardTitle>
-        <CardDescription>
-            Histórico detalhado de ações para controle e segurança.
-        </CardDescription>
       </CardHeader>
       <CardContent>
         <Table>
           <TableHeader>
-            <TableRow className="hover:bg-transparent border-border">
-                {/* Larguras fixas para evitar quebra */}
-                <TableHead className="w-[150px] min-w-[150px]">Data/Hora</TableHead>
-                <TableHead className="w-[200px] min-w-[150px]">Usuário</TableHead>
-                <TableHead className="w-[150px] min-w-[120px]">Ação</TableHead>
+            <TableRow>
+                <TableHead>Data/Hora</TableHead>
+                <TableHead>Usuário</TableHead>
+                <TableHead>Ação</TableHead>
                 <TableHead>Detalhes</TableHead>
-                {/* Garante espaço para o botão */}
-                <TableHead className="w-[60px] min-w-[60px]"></TableHead>
+                <TableHead></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {logs.length === 0 ? (
+            {safeLogs.length === 0 ? (
                 <TableRow>
                     <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
                         Nenhum registro encontrado.
                     </TableCell>
                 </TableRow>
             ) : (
-                logs.map((log) => {
-                    const actionPT = ACTION_MAP[log.action] || log.action;
-                    const entityPT = ENTITY_MAP[log.entity] || log.entity;
+                safeLogs.map((log) => {
                     const detailsPT = log.details ? log.details.replace("INCOME", "Receita").replace("EXPENSE", "Despesa") : "-";
                     const link = getLink(log);
 
                     return (
-                        <TableRow key={log.id} className="border-border hover:bg-muted/50">
+                        <TableRow key={log.id}>
                             <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
                                 {new Date(log.createdAt).toLocaleString('pt-BR')}
                             </TableCell>
-                            
-                            <TableCell className="text-xs font-medium truncate max-w-[200px]" title={log.user.email}>
+                            <TableCell className="text-xs font-medium truncate max-w-[200px]">
                                 {log.user.email}
                             </TableCell>
-                            
                             <TableCell>
-                                <Badge variant="outline" className={`text-[10px] font-bold border uppercase whitespace-nowrap
-                                    ${log.action === 'DELETE' ? 'text-rose-500 border-rose-500/20 bg-rose-500/10' : 
-                                    log.action === 'CREATE' ? 'text-emerald-500 border-emerald-500/20 bg-emerald-500/10' : 
-                                    'text-blue-500 border-blue-500/20 bg-blue-500/10'}`}>
-                                    {actionPT} • {entityPT}
+                                <Badge variant="outline" className="text-[10px] font-bold border uppercase whitespace-nowrap">
+                                    {log.action} • {log.entity}
                                 </Badge>
                             </TableCell>
-                            
-                            {/* TRUNCATE e MAX-WIDTH adicionados aqui */}
                             <TableCell className="text-sm text-foreground max-w-[250px] truncate" title={detailsPT}>
                                 {detailsPT}
                             </TableCell>
-
-                            <TableCell className="text-right pr-2">
+                            <TableCell className="text-right">
                                 {link && (
-                                    <Link href={link} title="Ver item">
-                                        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-emerald-500">
-                                            <ExternalLink className="w-4 h-4" />
-                                        </Button>
+                                    <Link href={link}>
+                                        <Button variant="ghost" size="icon" className="h-8 w-8"><ExternalLink className="w-4 h-4" /></Button>
                                     </Link>
                                 )}
                             </TableCell>

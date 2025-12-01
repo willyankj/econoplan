@@ -3,8 +3,8 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ArrowDownRight, ArrowUpRight, Briefcase } from "lucide-react";
-import { formatCurrency } from "@/lib/utils"; // <--- Importado
+import { ArrowDownRight, ArrowUpRight, Briefcase, PiggyBank } from "lucide-react"; 
+import { formatCurrency } from "@/lib/utils"; 
 
 interface Transaction {
   id: string;
@@ -42,14 +42,30 @@ export function TenantRecentTransactions({ transactions }: { transactions: Trans
                         </TableCell>
                     </TableRow>
                 ) : (
-                    transactions.map((t) => (
+                    transactions.map((t) => {
+                        // --- CORREÇÃO AQUI: Verifica os novos nomes "Metas" e "Resgate de Metas" ---
+                        const isInvestment = 
+                            t.category?.name === "Metas" || 
+                            t.category?.name === "Resgate de Metas" ||
+                            t.category?.name === "Investimentos" || // Mantém compatibilidade com antigos
+                            t.description.startsWith("Depósito Meta") ||
+                            t.description.startsWith("Resgate Meta");
+
+                        return (
                         <TableRow key={t.id} className="border-border hover:bg-muted/50">
                             <TableCell className="font-medium text-foreground">
                                 <div className="flex items-center gap-2">
                                     <div className={`p-1.5 rounded-full ${t.type === 'INCOME' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>
                                         {t.type === 'INCOME' ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
                                     </div>
-                                    {t.description}
+                                    <div className="flex flex-col">
+                                        <span>{t.description}</span>
+                                        {isInvestment && (
+                                            <span className="text-[10px] text-emerald-500 flex items-center gap-1">
+                                                <PiggyBank className="w-3 h-3" /> Meta / Investimento
+                                            </span>
+                                        )}
+                                    </div>
                                 </div>
                             </TableCell>
                             <TableCell>
@@ -68,7 +84,7 @@ export function TenantRecentTransactions({ transactions }: { transactions: Trans
                                 {t.type === 'INCOME' ? '+' : '-'} {formatCurrency(Number(t.amount))}
                             </TableCell>
                         </TableRow>
-                    ))
+                    )})
                 )}
             </TableBody>
         </Table>

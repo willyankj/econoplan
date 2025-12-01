@@ -17,7 +17,8 @@ const GoalSchema = z.object({
     targetAmount: z.coerce.number().min(0),
     deadline: z.string().optional().nullable(),
     currentAmount: z.coerce.number().optional(),
-    contributionRules: z.string().optional() // JSON string
+    contributionRules: z.string().optional(),
+    linkedAccountId: z.string().optional().nullable() // <--- NOVO CAMPO NO SCHEMA
 });
 
 // === ORÇAMENTOS ===
@@ -69,7 +70,8 @@ export async function upsertGoal(formData: FormData, id?: string, isShared = fal
   const parsed = GoalSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { error: "Dados inválidos" };
   
-  const { name, targetAmount, deadline, currentAmount, contributionRules: rulesString } = parsed.data;
+  // Extrai o novo campo linkedAccountId
+  const { name, targetAmount, deadline, currentAmount, contributionRules: rulesString, linkedAccountId } = parsed.data;
 
   let contributionRules = null;
   if (rulesString) {
@@ -80,7 +82,8 @@ export async function upsertGoal(formData: FormData, id?: string, isShared = fal
     name,
     targetAmount,
     deadline: deadline ? new Date(deadline) : null,
-    contributionRules: contributionRules ?? undefined
+    contributionRules: contributionRules ?? undefined,
+    linkedAccountId: linkedAccountId === "none" ? null : linkedAccountId // Salva o vínculo ou remove se for "none"
   };
 
   if (id) {
@@ -136,7 +139,9 @@ export async function moveMoneyGoal(goalId: string, amount: number, accountId: s
 
     const isDeposit = type === 'DEPOSIT';
     const txType = isDeposit ? "EXPENSE" : "INCOME";
-    const categoryName = isDeposit ? "Investimentos" : "Resgate Investimento";
+    
+    const categoryName = isDeposit ? "Metas" : "Resgate de Metas";
+    const categoryIcon = isDeposit ? "PiggyBank" : "Wallet";
 
     const category = await prisma.category.upsert({ 
         where: { 
@@ -147,12 +152,28 @@ export async function moveMoneyGoal(goalId: string, amount: number, accountId: s
             } 
         }, 
         update: {}, 
-        create: { name: categoryName, type: txType, workspaceId: account.workspaceId } 
+        create: { 
+            name: categoryName, 
+            type: txType, 
+            workspaceId: account.workspaceId,
+            icon: categoryIcon,
+            color: "#10b981" 
+        } 
     });
 
     await prisma.$transaction([
         prisma.transaction.create({
-            data: { description: `${isDeposit ? 'Depósito' : 'Resgate'}: ${goal.name}`, amount, type: txType, date: new Date(), workspaceId: account.workspaceId, bankAccountId: accountId, goalId, isPaid: true, categoryId: category.id }
+            data: { 
+                description: `${isDeposit ? 'Depósito Meta' : 'Resgate Meta'}: ${goal.name}`, 
+                amount, 
+                type: txType, 
+                date: new Date(), 
+                workspaceId: account.workspaceId, 
+                bankAccountId: accountId, 
+                goalId, 
+                isPaid: true, 
+                categoryId: category.id 
+            }
         }),
         prisma.bankAccount.update({ where: { id: accountId }, data: { balance: isDeposit ? { decrement: amount } : { increment: amount } } }),
         prisma.goal.update({ where: { id: goalId }, data: { currentAmount: isDeposit ? { increment: amount } : { decrement: amount } } })
@@ -162,11 +183,12 @@ export async function moveMoneyGoal(goalId: string, amount: number, accountId: s
 
     revalidatePath('/dashboard/goals'); 
     revalidatePath('/dashboard/accounts');
-    revalidatePath('/dashboard/settings');
+    revalidatePath('/dashboard/transactions'); 
+    revalidatePath('/dashboard');
     return { success: true };
 }
 
-// === SISTEMA / NOTIFICAÇÕES ===
+// ... (Funções de notificação mantêm iguais)
 export async function getNotifications() {
     const { user } = await validateUser();
     if (!user) return [];

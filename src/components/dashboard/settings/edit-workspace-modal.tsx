@@ -7,16 +7,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Briefcase, Loader2, Pencil } from "lucide-react";
 import { updateWorkspaceName } from '@/app/dashboard/actions';
-import { toast } from "sonner"; // <--- ADICIONADO
+import { toast } from "sonner";
 
-interface EditWorkspaceModalProps {
-  workspace: {
-    id: string;
-    name: string;
-  };
-}
-
-export function EditWorkspaceModal({ workspace }: EditWorkspaceModalProps) {
+export function EditWorkspaceModal({ workspace }: { workspace: { id: string, name: string } }) {
   const [open, setOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -25,49 +18,54 @@ export function EditWorkspaceModal({ workspace }: EditWorkspaceModalProps) {
     setIsLoading(true);
     const formData = new FormData(event.currentTarget);
     
-    const result = await updateWorkspaceName(workspace.id, formData);
-    
-    setIsLoading(false);
-
-    // --- LÓGICA DE FEEDBACK ADICIONADA ---
-    if (result?.error) {
-        toast.error("Erro ao renomear", { description: result.error });
-    } else {
-        toast.success("Workspace renomeado com sucesso!");
+    try {
+        await updateWorkspaceName(workspace.id, formData);
+        toast.success("Nome atualizado!");
         setOpen(false);
+    } catch {
+        toast.error("Erro ao atualizar.");
+    } finally {
+        setIsLoading(false);
     }
   }
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-blue-400 hover:bg-blue-500/10">
+        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
             <Pencil className="w-4 h-4" />
         </Button>
       </DialogTrigger>
-      <DialogContent className="bg-[#1a1d24] border-slate-700 text-slate-200 sm:max-w-[425px]">
-        <DialogHeader>
-          <DialogTitle className="text-white flex items-center gap-2">
-            <Briefcase className="w-5 h-5 text-blue-500" />
-            Renomear Workspace
-          </DialogTitle>
-        </DialogHeader>
-        
-        <form onSubmit={handleSubmit} className="grid gap-4 py-4">
-          <div className="grid gap-2">
-            <Label htmlFor="name">Nome do Workspace</Label>
-            <Input 
-                id="name" 
-                name="name" 
-                defaultValue={workspace.name} 
-                className="bg-slate-900 border-slate-700 text-white" 
-                required 
-            />
-          </div>
+      
+      <DialogContent className="bg-card border-border text-card-foreground sm:max-w-[400px] p-0 gap-0 rounded-xl overflow-hidden">
+        <form onSubmit={handleSubmit} className="flex flex-col">
+            
+            <div className="bg-slate-50 dark:bg-slate-950/20 p-6 pb-8 flex flex-col items-center">
+                <DialogHeader className="mb-4">
+                    <DialogTitle className="text-center text-muted-foreground font-medium text-sm uppercase tracking-wider">
+                        Editar Workspace
+                    </DialogTitle>
+                </DialogHeader>
+                <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-slate-200 to-slate-300 dark:from-slate-700 dark:to-slate-800 flex items-center justify-center text-slate-500 dark:text-slate-300 shadow-inner">
+                    <Briefcase className="w-8 h-8" />
+                </div>
+            </div>
 
-          <Button type="submit" disabled={isLoading} className="w-full bg-blue-600 hover:bg-blue-500 text-white mt-2">
-            {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Salvar Alterações'}
-          </Button>
+            <div className="p-6 space-y-5">
+                <div className="grid gap-1.5">
+                    <Label className="text-xs text-muted-foreground ml-1">Nome do Workspace</Label>
+                    <Input 
+                        name="name" 
+                        defaultValue={workspace.name} 
+                        className="bg-muted/50 border-transparent focus:border-slate-500 transition-all h-11" 
+                        required 
+                    />
+                </div>
+
+                <Button type="submit" disabled={isLoading} className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold h-11 shadow-md">
+                    {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Salvar'}
+                </Button>
+            </div>
         </form>
       </DialogContent>
     </Dialog>

@@ -1,355 +1,271 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+// ... (Imports iguais ao anterior)
+import { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Plus, Pencil, Loader2, CreditCard, Landmark, AlertTriangle, Ban } from "lucide-react";
-import { upsertTransaction, stopTransactionRecurrence } from '@/app/dashboard/actions';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { CategoryCombobox } from '@/components/dashboard/categories/category-combobox';
-import { BankLogo } from "@/components/ui/bank-logo"; 
-import { toast } from "sonner"; 
+import { ArrowUpCircle, ArrowDownCircle, Loader2, CalendarIcon, Plus, CreditCard as CreditCardIcon, RefreshCw, Layers, Pencil } from "lucide-react";
+import { upsertTransaction } from '@/app/dashboard/actions';
+import { toast } from "sonner";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { cn, formatCurrency } from "@/lib/utils";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import { Checkbox } from "@/components/ui/checkbox";
+import { AccountModal } from "@/components/dashboard/accounts/account-modal";
+import { CardModal } from "@/components/dashboard/cards/card-modal";
+import { CategoryModal } from "@/components/dashboard/categories/category-modal";
+import { BankLogo } from "@/components/ui/bank-logo";
+import * as Icons from "lucide-react";
 
-interface Props {
+interface TransactionModalProps {
   transaction?: any;
-  accounts?: any[];
-  cards?: any[];
-  categories?: any[];
+  accounts: any[];
+  cards: any[];
+  categories: any[];
+  children?: React.ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
-export function TransactionModal({ transaction, accounts = [], cards = [], categories = [] }: Props) {
-  const [open, setOpen] = useState(false);
+export function TransactionModal({ transaction, accounts, cards, categories, children, open: controlledOpen, onOpenChange }: TransactionModalProps) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isOpen = controlledOpen !== undefined ? controlledOpen : internalOpen;
+  const setOpen = onOpenChange || setInternalOpen;
+
   const [isLoading, setIsLoading] = useState(false);
-  const [isStopping, setIsStopping] = useState(false); // Estado para o botão de cancelar recorrência
-  
-  // Estados
-  const [paymentMethod, setPaymentMethod] = useState('ACCOUNT');
-  const [type, setType] = useState<'INCOME' | 'EXPENSE'>('EXPENSE');
-  const [recurrence, setRecurrence] = useState('NONE');
-  const [installments, setInstallments] = useState(2);
-  const [currentAmount, setCurrentAmount] = useState('');
+  const [type, setType] = useState<'EXPENSE' | 'INCOME' | 'TRANSFER'>(transaction?.type || 'EXPENSE');
+  const [date, setDate] = useState<Date>(transaction?.date ? new Date(transaction.date) : new Date());
+  const [isRecurring, setIsRecurring] = useState(transaction?.isRecurring || false);
+  const [recurrence, setRecurrence] = useState(transaction?.frequency || 'MONTHLY');
+  const [installments, setInstallments] = useState(transaction?.installmentTotal || 1);
+  const [showAccountModal, setShowAccountModal] = useState(false);
+  const [showCardModal, setShowCardModal] = useState(false);
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
 
   const isEditing = !!transaction;
-  const currentType = isEditing ? transaction.type : type;
-  
-  const availableCategories = categories.filter(c => c.type === currentType);
-
-  // Carrega valor na edição
-  useEffect(() => {
-      if (transaction?.amount) setCurrentAmount(String(transaction.amount));
-  }, [transaction]);
-
-  // Bloqueia cartão se for Receita
-  useEffect(() => {
-    if (type === 'INCOME') {
-      setPaymentMethod('ACCOUNT');
-    }
-  }, [type]);
-
-  // Função para cancelar recorrência
-  const handleStopRecurrence = async () => {
-    if (!confirm("Deseja parar de repetir esta despesa? As cobranças futuras automáticas serão canceladas.")) return;
-    
-    setIsStopping(true);
-    const result = await stopTransactionRecurrence(transaction.id);
-    setIsStopping(false);
-    
-    if (result?.error) {
-        toast.error(result.error);
-    } else {
-        toast.success("Recorrência cancelada!");
-        setOpen(false);
-    }
-  };
+  const themeColor = type === 'EXPENSE' ? 'text-rose-500' : (type === 'INCOME' ? 'text-emerald-500' : 'text-blue-500');
+  const themeBg = type === 'EXPENSE' ? 'bg-rose-500' : (type === 'INCOME' ? 'bg-emerald-500' : 'bg-blue-500');
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const formData = new FormData(event.currentTarget);
-    
-    const description = formData.get("description")?.toString().trim();
-    let amount = formData.get("amount")?.toString(); 
-    const date = formData.get("date")?.toString();
-    const category = formData.get("category")?.toString();
-
-    // Lógica invertida para parcelamento (Valor da Parcela -> Total)
-    if (!isEditing && recurrence === 'INSTALLMENT' && installments > 1) {
-        const installmentValue = parseFloat(amount || "0");
-        const totalValue = installmentValue * installments;
-        amount = totalValue.toString();
-        formData.set("amount", amount); 
-    }
-
-    if (!description) return toast.error("A descrição é obrigatória.");
-    if (!amount || Number(amount) <= 0) return toast.error("O valor deve ser maior que zero.");
-    if (!date) return toast.error("A data é obrigatória.");
-    if (!category) return toast.error("Selecione uma categoria.");
-
-    if (!isEditing) {
-        if (paymentMethod === 'ACCOUNT' && !formData.get("accountId")) return toast.error("Selecione uma conta bancária.");
-        if (paymentMethod === 'CREDIT_CARD' && !formData.get("cardId")) return toast.error("Selecione um cartão de crédito.");
-    }
-
     setIsLoading(true);
-    
-    if (!isEditing) {
-        formData.append('type', type);
-        formData.append('paymentMethod', paymentMethod);
-        formData.append('recurrence', recurrence);
-        // installments já está no formData pelo input
-    } else {
-        formData.append('type', transaction.type);
+    const formData = new FormData(event.currentTarget);
+    formData.set('date', date.toISOString().split('T')[0]);
+    formData.set('type', type);
+    if (isRecurring) {
+        formData.set('recurrence', recurrence);
+        if (recurrence === 'INSTALLMENT') {
+            formData.set('installments', installments.toString());
+        }
     }
-
     const result = await upsertTransaction(formData, transaction?.id);
     setIsLoading(false);
-
-    if (result?.error) toast.error(result.error);
-    else {
+    if (result?.error) {
+        toast.error("Erro ao salvar", { description: result.error });
+    } else {
         toast.success(isEditing ? "Transação atualizada!" : "Transação criada!");
         setOpen(false);
-        if (!isEditing) {
-            setRecurrence('NONE');
-            setInstallments(2);
-            setCurrentAmount('');
-        }
     }
   }
 
-  const defaultDate = transaction ? new Date(transaction.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
-  const formatMoney = (val: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
+  const renderCategoryIcon = (iconName: string, color: string) => {
+      // @ts-ignore
+      const Icon = Icons[iconName] || Icons.Circle;
+      return <Icon className="w-4 h-4 mr-2" style={{ color: color }} />;
+  };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        {isEditing ? (
-            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-emerald-600">
-                <Pencil className="w-4 h-4" />
-            </Button>
-        ) : (
-            <Button className="hidden sm:flex bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm">
-                <Plus className="w-4 h-4 mr-2" /> Nova Transação
-            </Button>
-        )}
-      </DialogTrigger>
-      <DialogContent className="bg-card border-border text-card-foreground sm:max-w-[500px] max-h-[90vh] overflow-y-auto scrollbar-thin">
-        <DialogHeader>
-          <DialogTitle>{isEditing ? "Editar Transação" : "Nova Transação"}</DialogTitle>
-        </DialogHeader>
-        
-        {/* --- SEÇÃO DE ALERTA DE RECORRÊNCIA (NOVO) --- */}
-        {isEditing && transaction?.isRecurring && (
-            <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 flex flex-col gap-2 mb-2">
-                <div className="flex items-center gap-2 text-amber-500 text-xs font-semibold uppercase tracking-wide">
-                    <AlertTriangle className="w-4 h-4" />
-                    Transação Recorrente
-                </div>
-                <div className="flex items-center justify-between">
-                    <p className="text-xs text-muted-foreground">
-                        Esta transação gera lançamentos automáticos todo mês.
-                    </p>
-                    <Button 
-                        type="button" 
-                        variant="ghost" 
-                        size="sm" 
-                        onClick={handleStopRecurrence}
-                        disabled={isStopping}
-                        className="h-7 text-xs text-rose-500 hover:text-rose-600 hover:bg-rose-500/10"
-                    >
-                        {isStopping ? <Loader2 className="w-3 h-3 animate-spin" /> : <Ban className="w-3 h-3 mr-1" />}
-                        Encerrar Recorrência
+    <>
+    <Dialog open={isOpen} onOpenChange={setOpen}>
+      {!onOpenChange && (
+          <DialogTrigger asChild>
+            {children ? children : (
+                isEditing ? (
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
+                        <Pencil className="w-4 h-4" />
                     </Button>
-                </div>
-            </div>
-        )}
+                ) : (
+                    <Button className="bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm font-semibold rounded-full px-6 h-11">
+                        <Plus className="w-5 h-5 mr-2" /> Nova Transação
+                    </Button>
+                )
+            )}
+          </DialogTrigger>
+      )}
+      <DialogContent className="bg-card border-border text-card-foreground sm:max-w-[500px] max-h-[90vh] overflow-y-auto scrollbar-thin p-0 gap-0 rounded-xl overflow-hidden">
         
-        <form onSubmit={handleSubmit} className="grid gap-4 py-2">
-          
-          {/* 1. SELETOR DE TIPO */}
-          {!isEditing && (
-             <div className="grid grid-cols-2 gap-1 bg-muted/40 p-1 rounded-lg border border-border/50">
-                <button 
-                    type="button" 
-                    onClick={() => setType('INCOME')} 
-                    className={`py-1.5 rounded-md text-xs font-medium transition-all ${type === 'INCOME' ? 'bg-emerald-600 text-white shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-background/50'}`}
-                >
-                    Receita
-                </button>
-                <button 
-                    type="button" 
-                    onClick={() => setType('EXPENSE')} 
-                    className={`py-1.5 rounded-md text-xs font-medium transition-all ${type === 'EXPENSE' ? 'bg-rose-600 text-white shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-background/50'}`}
-                >
-                    Despesa
-                </button>
-             </div>
-          )}
+        <form onSubmit={handleSubmit} className="flex flex-col">
+            <div className={`p-6 pb-8 transition-colors duration-300 ${type === 'EXPENSE' ? 'bg-rose-50 dark:bg-rose-950/20' : (type === 'INCOME' ? 'bg-emerald-50 dark:bg-emerald-950/20' : 'bg-blue-50 dark:bg-blue-950/20')}`}>
+                <DialogHeader className="mb-4">
+                    <DialogTitle className="text-center text-muted-foreground font-medium text-sm uppercase tracking-wider">
+                        {isEditing ? "Editar Movimentação" : "Nova Movimentação"}
+                    </DialogTitle>
+                </DialogHeader>
 
-          {/* 2. ABAS CONTA/CARTÃO */}
-          {!isEditing && (
-             <Tabs value={paymentMethod} onValueChange={setPaymentMethod}>
-                <TabsList className="grid w-full grid-cols-2 bg-muted/30 border border-border p-0.5 h-9 rounded-lg">
-                    <TabsTrigger 
-                        value="ACCOUNT"
-                        className="text-xs h-8 data-[state=active]:bg-background data-[state=active]:shadow-sm text-muted-foreground/80"
-                    >
-                        <Landmark className="w-3.5 h-3.5 mr-1.5" /> Conta
-                    </TabsTrigger>
-                    <TabsTrigger 
-                        value="CREDIT_CARD" 
-                        disabled={type === 'INCOME'}
-                        className="text-xs h-8 data-[state=active]:bg-background data-[state=active]:shadow-sm text-muted-foreground/80"
-                    >
-                        <CreditCard className="w-3.5 h-3.5 mr-1.5" /> Cartão
-                    </TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="ACCOUNT" className="mt-2">
-                    <Select name="accountId">
-                        <SelectTrigger className="bg-background/50 border-border text-foreground h-10 text-sm">
-                            <SelectValue placeholder="Selecione a conta..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {accounts.map(a => (
-                                <SelectItem key={a.id} value={a.id}>
-                                    <div className="flex items-center gap-2">
-                                        <div className="w-5 h-5 flex items-center justify-center rounded bg-muted/50 p-0.5 border border-border/50">
-                                            <BankLogo bankName={a.bank} className="w-full h-full object-contain" />
-                                        </div>
-                                        <span className="text-sm">{a.name}</span>
-                                    </div>
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                </TabsContent>
-
-                <TabsContent value="CREDIT_CARD" className="mt-2">
-                    <Select name="cardId">
-                        <SelectTrigger className="bg-background/50 border-border text-foreground h-10 text-sm">
-                            <SelectValue placeholder="Selecione o cartão..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {cards.map(c => (
-                                <SelectItem key={c.id} value={c.id}>
-                                    <div className="flex items-center gap-2">
-                                        <div className="w-5 h-5 flex items-center justify-center rounded bg-muted/50 p-0.5 border border-border/50">
-                                            <BankLogo bankName={c.bank} className="w-full h-full object-contain" />
-                                        </div>
-                                        <span className="text-sm">{c.name}</span>
-                                    </div>
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                </TabsContent>
-             </Tabs>
-          )}
-
-          <div className="grid gap-2">
-            <Label className="text-xs">Descrição</Label>
-            <Input name="description" defaultValue={transaction?.description} className="bg-muted/30 border-border text-foreground h-10" placeholder="Ex: Compras do mês" />
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="grid gap-2">
-                <Label className="text-xs">
-                    {(!isEditing && recurrence === 'INSTALLMENT') ? 'Valor da Parcela (R$)' : 'Valor (R$)'}
-                </Label>
-                <Input 
-                    name="amount" 
-                    type="number" 
-                    step="0.01" 
-                    value={currentAmount} 
-                    onChange={(e) => setCurrentAmount(e.target.value)}
-                    className="bg-muted/30 border-border text-foreground h-10 font-semibold" 
-                    placeholder="0,00" 
-                />
-            </div>
-            <div className="grid gap-2">
-                <Label className="text-xs">Data</Label>
-                <Input name="date" type="date" defaultValue={defaultDate} className="bg-muted/30 border-border text-foreground h-10" />
-            </div>
-          </div>
-
-          <div className="grid gap-2">
-            <Label className="text-xs">Categoria</Label>
-            <CategoryCombobox 
-                categories={availableCategories} 
-                type={currentType}
-                defaultValue={transaction?.category?.name || ''}
-            />
-          </div>
-
-          {/* 3. SEÇÃO DE REPETIÇÃO */}
-          {!isEditing && (
-            <div className="bg-muted/20 p-3 rounded-lg border border-border/60 space-y-2.5 mt-1">
-                <div className="flex items-center gap-2">
-                    <Label className="text-[10px] uppercase text-muted-foreground/80 font-bold tracking-wider">Repetição</Label>
-                    <div className="flex-1 h-px bg-border/60" />
-                </div>
-                
-                <div className="flex gap-2">
-                    <button 
-                        type="button"
-                        onClick={() => setRecurrence('NONE')}
-                        className={`flex-1 py-1.5 text-xs rounded-md border transition-all ${recurrence === 'NONE' ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'bg-background/50 border-border hover:bg-accent text-muted-foreground'}`}
-                    >
-                        Única
-                    </button>
-                    <button 
-                        type="button"
-                        onClick={() => setRecurrence('MONTHLY')}
-                        className={`flex-1 py-1.5 text-xs rounded-md border transition-all ${recurrence === 'MONTHLY' ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'bg-background/50 border-border hover:bg-accent text-muted-foreground'}`}
-                    >
-                        Fixa
-                    </button>
-                    
-                    {paymentMethod === 'CREDIT_CARD' && type === 'EXPENSE' && (
-                        <button 
-                            type="button"
-                            onClick={() => setRecurrence('INSTALLMENT')}
-                            className={`flex-1 py-1.5 text-xs rounded-md border transition-all ${recurrence === 'INSTALLMENT' ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'bg-background/50 border-border hover:bg-accent text-muted-foreground'}`}
-                        >
-                            Parcelada
-                        </button>
-                    )}
+                <div className="relative flex justify-center items-center">
+                    <span className={`text-2xl font-medium mr-2 opacity-50 ${themeColor}`}>R$</span>
+                    <Input name="amount" type="number" step="0.01" placeholder="0,00" defaultValue={transaction?.amount} className={`text-5xl font-bold text-center border-none shadow-none bg-transparent focus-visible:ring-0 h-16 w-full placeholder:text-muted-foreground/30 ${themeColor} [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`} autoFocus={!isEditing} required />
                 </div>
 
-                {/* Input de Parcelas */}
-                {recurrence === 'INSTALLMENT' && (
-                    <div className="flex items-center gap-3 animate-in fade-in slide-in-from-top-2 pt-1">
-                        <Label className="text-xs whitespace-nowrap">Parcelas:</Label>
-                        <div className="flex items-center gap-2 w-full">
-                            <Input 
-                                name="installments" 
-                                type="number" 
-                                min="2" max="24" 
-                                value={installments}
-                                onChange={(e) => setInstallments(parseInt(e.target.value))}
-                                className="w-16 h-8 bg-background/80 border-border text-sm" 
-                            />
-                            {/* Mostra o TOTAL calculado automaticamente */}
-                            <span className="text-xs text-muted-foreground truncate flex-1">
-                                {installments > 0 && Number(currentAmount) > 0
-                                    ? `Total: ${formatMoney(Number(currentAmount) * installments)}`
-                                    : ''}
-                            </span>
+                <div className="flex justify-center mt-6">
+                    <div className="bg-background/50 p-1 rounded-full border border-border shadow-sm flex gap-1">
+                        <button type="button" onClick={() => setType('EXPENSE')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${type === 'EXPENSE' ? 'bg-rose-500 text-white shadow-md' : 'text-muted-foreground hover:bg-muted'}`}>Despesa</button>
+                        <button type="button" onClick={() => setType('INCOME')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${type === 'INCOME' ? 'bg-emerald-500 text-white shadow-md' : 'text-muted-foreground hover:bg-muted'}`}>Receita</button>
+                        <button type="button" onClick={() => setType('TRANSFER')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${type === 'TRANSFER' ? 'bg-blue-500 text-white shadow-md' : 'text-muted-foreground hover:bg-muted'}`}>Transf.</button>
+                    </div>
+                </div>
+            </div>
+
+            {/* CORPO DO FORMULÁRIO (Igual ao anterior, apenas mantendo estrutura) */}
+            <div className="p-6 space-y-5">
+                <div className="grid grid-cols-[1fr,auto] gap-3">
+                    <div className="grid gap-1.5">
+                        <Label className="text-xs text-muted-foreground ml-1">Descrição</Label>
+                        <Input name="description" placeholder="Ex: Mercado..." defaultValue={transaction?.description} className="bg-muted/50 border-transparent focus:border-primary focus:bg-background transition-all" required />
+                    </div>
+                    <div className="grid gap-1.5 w-[140px]">
+                        <Label className="text-xs text-muted-foreground ml-1">Data</Label>
+                        <Popover>
+                            <PopoverTrigger asChild>
+                                <Button variant={"outline"} className={cn("w-full pl-3 text-left font-normal bg-muted/50 border-transparent hover:bg-background", !date && "text-muted-foreground")}>{date ? format(date, "dd/MM/yyyy", { locale: ptBR }) : <span>Selecione</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0" align="end">
+                                <Calendar mode="single" selected={date} onSelect={(d) => d && setDate(d)} initialFocus />
+                            </PopoverContent>
+                        </Popover>
+                    </div>
+                </div>
+
+                {type !== 'TRANSFER' && (
+                    <div className="grid gap-1.5">
+                        <Label className="text-xs text-muted-foreground ml-1 flex justify-between">
+                            Categoria
+                            <span className="text-[10px] text-primary cursor-pointer hover:underline" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowCategoryModal(true); }}>+ Criar nova</span>
+                        </Label>
+                        <div className="flex gap-2">
+                            <Select name="categoryId" defaultValue={transaction?.categoryId}>
+                                <SelectTrigger className="bg-muted/50 border-transparent w-full"><SelectValue placeholder="Selecione..." /></SelectTrigger>
+                                <SelectContent className="max-h-[200px]">
+                                    {categories.filter(c => c.type === type).map(cat => (
+                                        <SelectItem key={cat.id} value={cat.id}>
+                                            <div className="flex items-center">{renderCategoryIcon(cat.icon, cat.color)}{cat.name}</div>
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            <Button type="button" size="icon" variant="secondary" className="shrink-0" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowCategoryModal(true); }}><Plus className="w-4 h-4" /></Button>
                         </div>
                     </div>
                 )}
-                
-                <input type="hidden" name="recurrence" value={recurrence} />
-            </div>
-          )}
 
-          <Button type="submit" disabled={isLoading} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white mt-4 h-11 font-semibold text-base shadow-md">
-            {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : (isEditing ? 'Salvar Alterações' : 'Confirmar Transação')}
-          </Button>
+                {type === 'TRANSFER' ? (
+                    <div className="flex flex-col gap-4 bg-blue-50/50 dark:bg-blue-900/10 p-4 rounded-xl border border-blue-100 dark:border-blue-800/30">
+                        <div className="grid gap-1.5">
+                            <Label className="text-xs text-blue-600 dark:text-blue-400 font-bold ml-1">De onde sai?</Label>
+                            <div className="flex gap-2">
+                                <Select name="accountId">
+                                    <SelectTrigger className="bg-background border-border text-foreground w-full"><SelectValue placeholder="Conta Origem" /></SelectTrigger>
+                                    <SelectContent>{accounts.map(acc => (<SelectItem key={acc.id} value={acc.id}><div className="flex items-center gap-2"><BankLogo bankName={acc.bank} className="w-4 h-4" />{acc.name}</div></SelectItem>))}</SelectContent>
+                                </Select>
+                                <Button type="button" size="icon" variant="secondary" className="shrink-0 bg-background hover:bg-muted" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowAccountModal(true); }}><Plus className="w-4 h-4" /></Button>
+                            </div>
+                        </div>
+                        <div className="relative h-4 flex items-center justify-center">
+                            <div className="absolute inset-x-0 top-1/2 h-px bg-blue-200 dark:bg-blue-800/50"></div>
+                            <div className="relative bg-blue-50 dark:bg-slate-900 px-2 text-[10px] text-blue-400 uppercase font-bold">Para</div>
+                        </div>
+                        <div className="grid gap-1.5">
+                            <Label className="text-xs text-blue-600 dark:text-blue-400 font-bold ml-1">Para onde vai?</Label>
+                            <div className="flex gap-2">
+                                <Select name="destinationAccountId">
+                                    <SelectTrigger className="bg-background border-border text-foreground w-full"><SelectValue placeholder="Conta Destino" /></SelectTrigger>
+                                    <SelectContent>{accounts.map(acc => (<SelectItem key={acc.id} value={acc.id}><div className="flex items-center gap-2"><BankLogo bankName={acc.bank} className="w-4 h-4" />{acc.name}</div></SelectItem>))}</SelectContent>
+                                </Select>
+                                <Button type="button" size="icon" variant="secondary" className="shrink-0 bg-background hover:bg-muted" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowAccountModal(true); }}><Plus className="w-4 h-4" /></Button>
+                            </div>
+                        </div>
+                    </div>
+                ) : (
+                    <Tabs defaultValue={transaction?.creditCardId ? "card" : "account"} className="w-full">
+                        <TabsList className="grid w-full grid-cols-2 h-9 bg-muted/50 p-1 mb-2">
+                            <TabsTrigger value="account" className="text-xs font-medium">Conta Bancária</TabsTrigger>
+                            <TabsTrigger value="card" className="text-xs font-medium" disabled={type === 'INCOME'}>Cartão de Crédito</TabsTrigger>
+                        </TabsList>
+                        <TabsContent value="account" className="mt-0">
+                            <div className="grid gap-1.5">
+                                <Label className="text-xs text-muted-foreground ml-1 flex justify-between">Conta Selecionada<span className="text-[10px] text-primary cursor-pointer hover:underline" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowAccountModal(true); }}>+ Nova Conta</span></Label>
+                                <div className="flex gap-2">
+                                    <Select name="accountId" defaultValue={transaction?.bankAccountId}>
+                                        <SelectTrigger className="bg-muted/50 border-transparent w-full"><SelectValue placeholder="Selecione a conta..." /></SelectTrigger>
+                                        <SelectContent>{accounts.map(acc => (<SelectItem key={acc.id} value={acc.id}><div className="flex items-center gap-2"><BankLogo bankName={acc.bank} className="w-4 h-4" /><span className="truncate">{acc.name}</span><span className="text-xs text-muted-foreground ml-auto">{formatCurrency(acc.balance)}</span></div></SelectItem>))}</SelectContent>
+                                    </Select>
+                                    <Button type="button" size="icon" variant="secondary" className="shrink-0" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowAccountModal(true); }}><Plus className="w-4 h-4" /></Button>
+                                </div>
+                            </div>
+                            <input type="hidden" name="paymentMethod" value="ACCOUNT" />
+                        </TabsContent>
+                        <TabsContent value="card" className="mt-0">
+                            <div className="grid gap-1.5">
+                                <Label className="text-xs text-muted-foreground ml-1 flex justify-between">Cartão Selecionado<span className="text-[10px] text-primary cursor-pointer hover:underline" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowCardModal(true); }}>+ Novo Cartão</span></Label>
+                                <div className="flex gap-2">
+                                    <Select name="cardId" defaultValue={transaction?.creditCardId}>
+                                        <SelectTrigger className="bg-muted/50 border-transparent w-full"><SelectValue placeholder="Selecione o cartão..." /></SelectTrigger>
+                                        <SelectContent>{cards.map(card => (<SelectItem key={card.id} value={card.id}><div className="flex items-center gap-2"><CreditCardIcon className="w-4 h-4 text-muted-foreground" />{card.name}</div></SelectItem>))}</SelectContent>
+                                    </Select>
+                                    <Button type="button" size="icon" variant="secondary" className="shrink-0" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowCardModal(true); }}><Plus className="w-4 h-4" /></Button>
+                                </div>
+                            </div>
+                            <input type="hidden" name="paymentMethod" value="CREDIT_CARD" />
+                        </TabsContent>
+                    </Tabs>
+                )}
+
+                {type !== 'TRANSFER' && (
+                    <div className="bg-muted/30 p-3 rounded-lg border border-border/50">
+                        <div className="flex items-center space-x-2">
+                            <Checkbox id="recurring" checked={isRecurring} onCheckedChange={(c) => setIsRecurring(!!c)} />
+                            <Label htmlFor="recurring" className="text-xs font-medium cursor-pointer flex items-center gap-1"><RefreshCw className="w-3 h-3 text-muted-foreground" /> Repetir ou Parcelar?</Label>
+                        </div>
+                        {isRecurring && (
+                            <div className="grid grid-cols-2 gap-3 mt-3">
+                                <div className="grid gap-1.5">
+                                    <Label className="text-[10px] text-muted-foreground uppercase">Frequência</Label>
+                                    <Select value={recurrence} onValueChange={setRecurrence}>
+                                        <SelectTrigger className="h-8 text-xs bg-background"><SelectValue /></SelectTrigger>
+                                        <SelectContent><SelectItem value="MONTHLY">Mensal (Fixo)</SelectItem><SelectItem value="WEEKLY">Semanal</SelectItem><SelectItem value="YEARLY">Anual</SelectItem>{type === 'EXPENSE' && <SelectItem value="INSTALLMENT">Parcelado</SelectItem>}</SelectContent>
+                                    </Select>
+                                </div>
+                                {recurrence === 'INSTALLMENT' && type === 'EXPENSE' && (
+                                    <div className="grid gap-1.5">
+                                        <Label className="text-[10px] text-muted-foreground uppercase">Parcelas</Label>
+                                        <div className="relative">
+                                            <Layers className="absolute left-2 top-2 w-3 h-3 text-muted-foreground" />
+                                            <Input type="number" min="2" max="100" value={installments} onChange={e => setInstallments(Number(e.target.value))} className="h-8 text-xs bg-background pl-7" />
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                <Button type="submit" disabled={isLoading} className={`w-full text-white font-bold h-12 shadow-md transition-all hover:scale-[1.02] ${themeBg} hover:opacity-90`}>
+                    {isLoading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : (isEditing ? 'Salvar Alterações' : 'Confirmar')}
+                </Button>
+            </div>
         </form>
       </DialogContent>
     </Dialog>
+
+    <CategoryModal open={showCategoryModal} onOpenChange={setShowCategoryModal} />
+    <AccountModal open={showAccountModal} onOpenChange={setShowAccountModal} />
+    <CardModal open={showCardModal} onOpenChange={setShowCardModal} accounts={accounts} />
+    </>
   );
 }

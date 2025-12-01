@@ -7,7 +7,7 @@ import { Briefcase, Loader2 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox"; 
 import { Label } from "@/components/ui/label";
 import { toggleWorkspaceAccess } from '@/app/dashboard/actions';
-import { toast } from "sonner"; // <--- ADICIONADO
+import { toast } from "sonner";
 
 interface Workspace {
   id: string;
@@ -16,11 +16,12 @@ interface Workspace {
 
 interface Props {
   user: { id: string; name: string | null; email: string };
-  allWorkspaces: Workspace[];
-  userWorkspaces: string[]; 
+  allWorkspaces?: Workspace[]; // Opcional para evitar crash
+  userWorkspaces?: string[]; // Opcional
 }
 
-export function ManageAccessModal({ user, allWorkspaces, userWorkspaces }: Props) {
+// VALORES PADRÃO AQUI SÃO ESSENCIAIS
+export function ManageAccessModal({ user, allWorkspaces = [], userWorkspaces = [] }: Props) {
   const [open, setOpen] = useState(false);
   const [loadingId, setLoadingId] = useState<string | null>(null);
 
@@ -29,14 +30,16 @@ export function ManageAccessModal({ user, allWorkspaces, userWorkspaces }: Props
     const result = await toggleWorkspaceAccess(user.id, workspaceId, checked);
     setLoadingId(null);
 
-    // --- LÓGICA DE FEEDBACK ADICIONADA ---
     if (result?.error) {
         toast.error("Erro ao alterar acesso", { description: result.error });
     } else {
-        // Mensagem diferente se adicionou ou removeu
         toast.success(checked ? "Acesso concedido!" : "Acesso removido!");
     }
   };
+
+  // Garante novamente que são arrays (redundância de segurança)
+  const safeAllWorkspaces = Array.isArray(allWorkspaces) ? allWorkspaces : [];
+  const safeUserWorkspaces = Array.isArray(userWorkspaces) ? userWorkspaces : [];
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -55,8 +58,12 @@ export function ManageAccessModal({ user, allWorkspaces, userWorkspaces }: Props
         </DialogHeader>
         
         <div className="grid gap-3 py-4">
-           {allWorkspaces.map(ws => {
-             const hasAccess = userWorkspaces.includes(ws.id);
+           {safeAllWorkspaces.length === 0 && (
+               <p className="text-sm text-slate-500 text-center py-4">Nenhum workspace disponível.</p>
+           )}
+
+           {safeAllWorkspaces.map(ws => {
+             const hasAccess = safeUserWorkspaces.includes(ws.id);
              const isProcessing = loadingId === ws.id;
 
              return (

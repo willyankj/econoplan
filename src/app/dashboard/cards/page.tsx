@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { CalendarDays, CreditCard, ShieldCheck } from "lucide-react";
-import { CardModal } from "@/components/dashboard/cards/card-modal"; // <--- NOVO IMPORT
+import { CalendarDays } from "lucide-react";
+import { CardModal } from "@/components/dashboard/cards/card-modal";
 import { BankLogo } from "@/components/ui/bank-logo";
 import { PayInvoiceModal } from "@/components/dashboard/cards/pay-invoice-modal";
 import { CardActions } from "@/components/dashboard/cards/card-actions";
@@ -37,22 +37,15 @@ export default async function CardsPage() {
           <h2 className="text-2xl font-bold text-foreground">Meus Cartões</h2>
           <p className="text-muted-foreground">Gerencie limites e faturas</p>
         </div>
-        {/* USANDO O NOVO MODAL */}
         <CardModal accounts={accounts} />
       </div>
 
       {cards.length === 0 ? (
-        <div className="grid place-items-center py-16 px-4 border border-blue-500/20 rounded-2xl bg-gradient-to-b from-blue-500/5 to-transparent text-center">
-            <div className="relative mb-6">
-                <div className="absolute inset-0 bg-blue-500 blur-2xl opacity-20 rounded-full" />
-                <CreditCard className="w-24 h-24 text-blue-500 relative z-10 rotate-[-10deg]" />
-                <ShieldCheck className="w-10 h-10 text-emerald-400 absolute -bottom-2 -right-2 z-20 bg-card rounded-full p-1" />
-            </div>
+        <div className="grid place-items-center py-16 px-4 border border-dashed rounded-2xl bg-muted/20 text-center">
             <h3 className="text-xl font-bold text-foreground">Centralize seus Cartões</h3>
             <p className="text-muted-foreground max-w-sm mb-8 mt-2">
-                Não perca o controle das faturas. Cadastre seus cartões de crédito para acompanhar gastos e limites em tempo real.
+                Cadastre seus cartões de crédito para acompanhar gastos e limites em tempo real.
             </p>
-            {/* USANDO O NOVO MODAL NO ESTADO VAZIO */}
             <CardModal accounts={accounts} />
         </div>
       ) : (
@@ -93,10 +86,10 @@ export default async function CardsPage() {
                             </p>
                         </div>
                         
+                        {/* CORREÇÃO AQUI: Passando o objeto 'card' inteiro */}
                         <PayInvoiceModal 
-                            cardId={card.id}
-                            cardName={card.name}
-                            currentInvoice={currentInvoice}
+                            card={card}
+                            totalAmount={currentInvoice}
                             accounts={accounts}
                         />
                     </div>

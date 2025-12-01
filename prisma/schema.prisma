@@ -165,13 +165,17 @@ model BankAccount {
   workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
  
   transactions  Transaction[]
+  linkedGoals   Goal[]    @relation("LinkedAccount") 
+  
+  // --- NOVO: Cartões vinculados a esta conta ---
+  linkedCards   CreditCard[] @relation("CardLinkedAccount")
+  // --------------------------------------------
 
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
   @@index([workspaceId])
 }
-
 model Category {
   id            String          @id @default(uuid())
   name          String
@@ -292,6 +296,11 @@ model CreditCard {
   workspaceId    String
   workspace      Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   
+  // --- NOVO: Conta vinculada (Débito Automático) ---
+  linkedAccountId String?
+  linkedAccount   BankAccount? @relation("CardLinkedAccount", fields: [linkedAccountId], references: [id])
+  // ------------------------------------------------
+
   transactions   Transaction[]
   
   createdAt      DateTime      @default(now())
@@ -312,6 +321,11 @@ model Goal {
   tenantId      String?
   tenant        Tenant?    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   
+  // --- ADICIONE ESTAS LINHAS ---
+  linkedAccountId String?
+  linkedAccount   BankAccount? @relation("LinkedAccount", fields: [linkedAccountId], references: [id])
+  // -----------------------------
+
   transactions  Transaction[]
 
   createdAt     DateTime  @default(now())

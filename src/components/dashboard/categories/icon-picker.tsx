@@ -1,82 +1,137 @@
 'use client';
 
-import { Button } from "@/components/ui/button";
+import * as Icons from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { cn } from "@/lib/utils";
-import { AVAILABLE_ICONS, getIcon } from "@/lib/icons"; // <--- Import centralizado
-
-const AVAILABLE_COLORS = [
-  "#94a3b8", // Slate (Padrão)
-  "#ef4444", // Red
-  "#f97316", // Orange
-  "#f59e0b", // Amber
-  "#84cc16", // Lime
-  "#10b981", // Emerald
-  "#06b6d4", // Cyan
-  "#3b82f6", // Blue
-  "#6366f1", // Indigo
-  "#8b5cf6", // Violet
-  "#d946ef", // Fuchsia
-  "#ec4899", // Pink
-];
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { useState } from "react";
+import { Search } from "lucide-react";
 
 interface IconPickerProps {
-  selectedIcon: string;
-  selectedColor: string;
-  onIconChange: (icon: string) => void;
-  onColorChange: (color: string) => void;
+  selected: string;
+  onSelect: (icon: string) => void;
+  color?: string;
+  size?: 'sm' | 'md' | 'lg' | 'xl';
 }
 
-export function IconPicker({ selectedIcon, selectedColor, onIconChange, onColorChange }: IconPickerProps) {
-  const CurrentIcon = getIcon(selectedIcon);
+// 1. Dicionário de Tradução para Busca em PT-BR
+const translations: Record<string, string> = {
+  "casa": "Home", "lar": "Home", "moradia": "Home",
+  "carro": "Car", "veículo": "Car", "transporte": "Car", "uber": "Car",
+  "comida": "Utensils", "restaurante": "Utensils", "alimentação": "Utensils", "jantar": "Utensils",
+  "mercado": "ShoppingCart", "compras": "ShoppingBag", "loja": "Store",
+  "dinheiro": "Banknote", "pagamento": "CreditCard", "pix": "QrCode", "banco": "Landmark",
+  "saúde": "Heart", "médico": "Stethoscope", "hospital": "Activity",
+  "viagem": "Plane", "férias": "Palmtree", "mala": "Luggage",
+  "lazer": "Gamepad2", "jogos": "Gamepad2", "filmes": "Film", "música": "Music",
+  "trabalho": "Briefcase", "negócios": "Building2", "escritório": "Building",
+  "estudo": "GraduationCap", "escola": "BookOpen", "livro": "Book",
+  "academia": "Dumbbell", "esporte": "Trophy",
+  "pet": "Dog", "cachorro": "Dog", "gato": "Cat",
+  "internet": "Wifi", "telefone": "Phone", "celular": "Smartphone",
+  "luz": "Zap", "água": "Droplets",
+  "presente": "Gift", "doação": "HeartHandshake"
+};
+
+// 2. Ícones Prioritários (Aparecem no topo)
+const priorityIcons = [
+  "Home", "Car", "Utensils", "ShoppingCart", "CreditCard", "Banknote", 
+  "Landmark", "Heart", "Plane", "Briefcase", "GraduationCap", "Zap", 
+  "Droplets", "Wifi", "Phone", "Gift", "Gamepad2", "Dumbbell", "Dog"
+];
+
+// Filtra apenas ícones válidos do Lucide (remove funções utilitárias)
+const allIcons = Object.keys(Icons)
+  .filter(key => key !== "createLucideIcon" && key !== "Icon" && /^[A-Z]/.test(key));
+
+export function IconPicker({ selected, onSelect, color, size = 'md' }: IconPickerProps) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+
+  // @ts-ignore
+  const SelectedIcon = Icons[selected] || Icons.Tag; 
+
+  const sizeClass = {
+      sm: "w-4 h-4",
+      md: "w-6 h-6",
+      lg: "w-10 h-10",
+      xl: "w-14 h-14"
+  }[size];
+
+  // Lógica de Filtro Inteligente (PT-BR + EN)
+  const getFilteredIcons = () => {
+    if (!search) return priorityIcons; // Sem busca, mostra os populares
+
+    const term = search.toLowerCase();
+    
+    // Verifica se algum termo em PT-BR corresponde à busca e pega o nome em inglês
+    const translatedMatches = Object.entries(translations)
+        .filter(([pt]) => pt.includes(term))
+        .map(([, en]) => en);
+
+    // Filtra lista completa pelo nome em inglês OU pelos termos traduzidos encontrados
+    return allIcons.filter(icon => 
+        icon.toLowerCase().includes(term) || translatedMatches.includes(icon)
+    ).slice(0, 60);
+  };
+
+  const displayIcons = getFilteredIcons();
 
   return (
-    <div className="flex gap-2 w-full">
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button variant="outline" className="w-12 h-10 p-0 shrink-0" style={{ color: selectedColor, borderColor: selectedColor }}>
-            <CurrentIcon className="w-5 h-5" />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-64 p-2 z-[200]">
-          <div className="grid grid-cols-5 gap-1 max-h-[200px] overflow-y-auto">
-            {AVAILABLE_ICONS.map(iconName => {
-              const Icon = getIcon(iconName);
-              return (
-                <button
-                  key={iconName}
-                  type="button"
-                  onClick={() => onIconChange(iconName)}
-                  className={cn(
-                    "p-2 rounded-md hover:bg-muted flex items-center justify-center transition-colors",
-                    selectedIcon === iconName ? "bg-muted text-primary" : "text-muted-foreground"
-                  )}
-                >
-                  <Icon className="w-4 h-4" />
-                </button>
-              )
-            })}
-          </div>
-        </PopoverContent>
-      </Popover>
-
-      <div className="flex-1 min-w-0 flex items-center gap-1.5 overflow-x-auto p-1 no-scrollbar bg-muted/30 rounded-md border border-border">
-        {AVAILABLE_COLORS.map(color => (
-          <button
-            key={color}
-            type="button"
-            onClick={() => onColorChange(color)}
-            className={cn(
-              "w-6 h-6 rounded-full border-2 transition-all shrink-0",
-              selectedColor === color ? "border-white scale-110 shadow-sm" : "border-transparent opacity-70 hover:opacity-100"
-            )}
-            style={{ backgroundColor: color }}
-          />
-        ))}
-      </div>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button 
+            variant="ghost" 
+            className={`h-full w-full p-0 hover:bg-transparent flex items-center justify-center rounded-full`}
+            type="button" 
+        >
+            <SelectedIcon className={sizeClass} style={{ color: color || 'currentColor' }} />
+        </Button>
+      </PopoverTrigger>
       
-      <input type="hidden" name="icon" value={selectedIcon} />
-      <input type="hidden" name="color" value={selectedColor} />
-    </div>
+      <PopoverContent className="w-[320px] p-0 z-50 bg-card border-border" align="center" side="bottom">
+        <div className="p-3 border-b border-border">
+            <div className="relative">
+                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input 
+                    placeholder="Buscar (ex: casa, carro, luz)..." 
+                    className="pl-8 h-9 bg-muted/50 border-transparent focus:bg-background" 
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    autoFocus
+                />
+            </div>
+        </div>
+        <div className="grid grid-cols-6 gap-1 p-2 max-h-[300px] overflow-y-auto scrollbar-thin">
+            {displayIcons.map((iconName) => {
+                // @ts-ignore
+                const Icon = Icons[iconName];
+                if (!Icon) return null;
+                
+                return (
+                    <Button
+                        key={iconName}
+                        variant="ghost"
+                        size="icon"
+                        className={`h-10 w-10 hover:bg-muted ${selected === iconName ? 'bg-muted ring-2 ring-primary' : ''}`}
+                        onClick={() => {
+                            onSelect(iconName);
+                            setOpen(false);
+                        }}
+                        title={iconName} // Mostra o nome ao passar o mouse
+                        type="button"
+                    >
+                        <Icon className="w-5 h-5 text-foreground" />
+                    </Button>
+                )
+            })}
+            {displayIcons.length === 0 && (
+                <div className="col-span-6 text-center py-8 text-xs text-muted-foreground">
+                    Nenhum ícone encontrado para "{search}".
+                </div>
+            )}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }

@@ -5,11 +5,11 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { CreditCard, CheckCircle2, Clock, CheckCheck } from "lucide-react";
-import * as Icons from "lucide-react"; // Import para os ícones dinâmicos das categorias
+import { CreditCard, CheckCircle2, Clock, CheckCheck, PiggyBank } from "lucide-react";
+import * as Icons from "lucide-react"; 
 
 import { DeleteTransactionButton } from "./delete-button";
-import { TransactionModal } from "@/components/dashboard/transaction-modal";
+import { TransactionModal } from "@/components/dashboard/transaction-modal"; // Modal Principal
 import { TransactionFilterButton } from "./filter-button";
 import { SearchInput } from "./search-input";
 import { ExportButton } from "./export-button";
@@ -18,7 +18,6 @@ import { getUserWorkspace } from "@/lib/get-user-workspace";
 import { ImportTransactionsModal } from "@/components/dashboard/transactions/import-modal"; 
 import { formatCurrency } from "@/lib/utils";
 
-// --- NOVOS IMPORTS (Recorrências) ---
 import { getRecurringTransactions } from "@/app/dashboard/actions";
 import { RecurringModal } from "@/components/dashboard/transactions/recurring-modal";
 
@@ -34,20 +33,16 @@ export default async function TransactionsPage({
 
   const params = await searchParams;
 
-  // 1. BUSCA DADOS AUXILIARES
   const rawAccounts = await prisma.bankAccount.findMany({ where: { workspaceId }, orderBy: { name: 'asc' } });
   const accounts = rawAccounts.map(acc => ({ ...acc, balance: Number(acc.balance) }));
 
   const rawCards = await prisma.creditCard.findMany({ where: { workspaceId }, orderBy: { name: 'asc' } });
   const cards = rawCards.map(c => ({ ...c, limit: Number(c.limit) }));
 
-  // Busca categorias para passar aos modais
   const categories = await prisma.category.findMany({ where: { workspaceId }, orderBy: { name: 'asc' } });
 
-  // 2. BUSCA AS RECORRÊNCIAS ATIVAS (Para o novo botão de gestão)
   const recurringTransactions = await getRecurringTransactions();
 
-  // 3. CONSTRUÇÃO DO FILTRO (WHERE)
   const whereCondition: any = { 
     workspaceId,
   };
@@ -101,27 +96,25 @@ export default async function TransactionsPage({
           </p>
         </div>
           
-          {/* BARRA DE AÇÕES */}
-          <div className="flex gap-2 w-full md:w-auto flex-wrap md:flex-nowrap">
-            {/* 1. Botão de Gestão de Recorrências */}
+          <div className="flex gap-2 w-full md:w-auto flex-wrap md:flex-nowrap items-center">
             <RecurringModal transactions={recurringTransactions} />
 
-            {/* 2. Botão de Importar (Agora recebe categorias) */}
             {!params.cardId && (
                 <ImportTransactionsModal accounts={accounts} categories={categories} />
             )}
             
-            {/* 3. Filtros e Exportação */}
             <TransactionFilterButton accounts={accounts} cards={cards} categories={categories} />
             <ExportButton data={transactionsForExport} />
+
+            {/* MUDANÇA: Botão Nova Transação movido para cá */}
+            <TransactionModal accounts={accounts} cards={cards} categories={categories} />
           </div>
       </div>
 
       <Card className="bg-card border-border shadow-sm overflow-hidden mx-1">
+        {/* MUDANÇA: Removi o TransactionModal daqui de baixo para não duplicar e limpei o header */}
         <CardHeader className="border-b border-border bg-muted/40 px-6 py-4 flex flex-row justify-between items-center gap-4">
             <SearchInput />
-            {/* Botão Nova Transação (Criação Rápida no Extrato) */}
-            <TransactionModal accounts={accounts} cards={cards} categories={categories} />
         </CardHeader>
         
         <CardContent className="p-0 w-full overflow-x-auto max-w-[calc(100vw-3rem)] md:max-w-none">
@@ -144,12 +137,26 @@ export default async function TransactionsPage({
                         ...t, amount: Number(t.amount), bankAccount: undefined, creditCard: undefined   
                     };
 
+                    const isInvestment = 
+                        t.category?.name === "Metas" || 
+                        t.category?.name === "Resgate de Metas" ||
+                        t.category?.name === "Investimentos" || 
+                        t.description.startsWith("Depósito Meta") ||
+                        t.description.startsWith("Resgate Meta");
+
                     return (
                     <TableRow key={t.id} className="border-border hover:bg-muted/50 transition-colors">
                     <TableCell className="font-medium text-foreground">
-                        <div className="flex items-center gap-2">
-                            <div className={`w-2 h-2 rounded-full ${t.type === 'INCOME' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-                            {t.description}
+                        <div className="flex flex-col">
+                            <div className="flex items-center gap-2">
+                                <div className={`w-2 h-2 rounded-full ${t.type === 'INCOME' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                                {t.description}
+                            </div>
+                            {isInvestment && (
+                                <span className="text-[10px] text-emerald-500 flex items-center gap-1 ml-4 mt-1">
+                                    <PiggyBank className="w-3 h-3" /> Meta / Investimento
+                                </span>
+                            )}
                         </div>
                     </TableCell>
                     
@@ -212,7 +219,6 @@ export default async function TransactionsPage({
                     
                     <TableCell className="text-right">
                         <div className="flex justify-end items-center gap-1">
-                            {/* Modal de Edição (Passando categorias) */}
                             <TransactionModal transaction={transactionForModal} accounts={accounts} cards={cards} categories={categories} />
                             <DeleteTransactionButton id={t.id} />
                         </div>

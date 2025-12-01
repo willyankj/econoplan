@@ -1,123 +1,236 @@
-import { prisma } from "@/lib/prisma";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Trash2, Trophy, Calendar, Target, Users, Star } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
 import { getUserWorkspace } from "@/lib/get-user-workspace";
-import { DepositGoalModal } from "@/components/dashboard/goals/deposit-goal-modal";
-import { deleteGoal } from "@/app/dashboard/actions";
-import { GoalModal } from "@/components/dashboard/goals/goal-modal"; // <--- NOVO IMPORT
-import { GoalInfoDialog } from "@/components/dashboard/goals/goal-info-dialog";
+import { prisma } from "@/lib/prisma";
 import { formatCurrency } from "@/lib/utils";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
+import { Button } from "@/components/ui/button";
+import { Target, Trophy, Users, Trash2, Calendar, Star } from "lucide-react";
+import { GoalModal } from "@/components/dashboard/goals/goal-modal";
+import { DepositGoalModal } from "@/components/dashboard/goals/deposit-goal-modal";
+import { redirect } from "next/navigation";
+import { deleteGoal } from "@/app/dashboard/actions";
+import { GoalInfoDialog } from "@/components/dashboard/goals/goal-info-dialog";
+
+function getDaysRemaining(deadline: Date) {
+  const diff = new Date(deadline).getTime() - new Date().getTime();
+  const days = Math.ceil(diff / (1000 * 3600 * 24));
+  return days > 0 ? days : 0;
+}
 
 export default async function GoalsPage() {
-  const { workspaceId, user } = await getUserWorkspace();
-  if (!workspaceId || !user) return <div>Selecione um workspace</div>;
+  const { user, workspaceId } = await getUserWorkspace();
+  
+  if (!user || !workspaceId) {
+    redirect("/login");
+  }
 
-  const rawGoals = await prisma.goal.findMany({
+  const isOwner = user.role === 'OWNER';
+
+  const workspaces = await prisma.workspace.findMany({
+    where: { tenantId: user.tenantId },
+    select: { id: true, name: true }
+  });
+
+  const goalsRaw = await prisma.goal.findMany({
     where: {
       OR: [
         { workspaceId: workspaceId },
-        { tenantId: user.tenantId }
+        { tenantId: user.tenantId, workspaceId: null }
       ]
     },
-    include: { transactions: true },
-    orderBy: { createdAt: 'desc' }
+    include: { 
+        transactions: {
+            select: { amount: true, date: true, type: true, workspaceId: true },
+            orderBy: { date: 'desc' }
+        } 
+    },
+    orderBy: { deadline: 'asc' }
   });
 
-  const goals = rawGoals.map(g => ({
+  const goals = goalsRaw.map(g => ({
     ...g,
     targetAmount: Number(g.targetAmount),
     currentAmount: Number(g.currentAmount),
     transactions: g.transactions.map(t => ({...t, amount: Number(t.amount)}))
   }));
 
-  const rawAccounts = await prisma.bankAccount.findMany({ where: { workspaceId } });
-  const accountsClean = rawAccounts.map(a => ({...a, balance: Number(a.balance)}));
+  const accountsRaw = await prisma.bankAccount.findMany({
+    where: { workspaceId },
+    select: { id: true, name: true, bank: true, balance: true, workspace: { select: { name: true } } }
+  });
+  
+  const accounts = accountsRaw.map(a => ({
+      ...a, 
+      balance: Number(a.balance), 
+      workspaceName: a.workspace.name
+  }));
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-foreground">Meus Objetivos</h2>
-          <p className="text-muted-foreground">Sonhos e Metas Financeiras</p>
+          <h2 className="text-2xl font-bold text-foreground">Metas & Objetivos</h2>
+          <p className="text-muted-foreground">
+            Acompanhe o progresso dos seus sonhos financeiros
+          </p>
         </div>
-        {/* MUDANÇA: Usando GoalModal para criar nova meta */}
-        <GoalModal />
+        <div className="flex gap-2">
+            {/* PASSANDO ACCOUNTS PARA O MODAL */}
+            <GoalModal accounts={accounts} /> 
+            
+            {isOwner && (
+                <GoalModal isShared={true} workspaces={workspaces} />
+            )}
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         {goals.map((goal) => {
-          const current = goal.currentAmount;
-          const target = goal.targetAmount;
-          const percentage = target > 0 ? Math.min((current / target) * 100, 100) : 0;
-          const isShared = !!goal.tenantId;
+            const current = goal.currentAmount;
+            const target = goal.targetAmount;
+            const progress = target > 0 ? Math.min((current / target) * 100, 100) : 0;
+            const isCompleted = progress >= 100;
+            const daysLeft = goal.deadline ? getDaysRemaining(goal.deadline) : null;
+            const isShared = !!goal.tenantId;
 
-          return (
-            <Card key={goal.id} className={`relative overflow-hidden bg-card border-border transition-all group ${isShared ? 'border-purple-500/30' : 'hover:border-emerald-500/30'}`}>
-              {isShared && <div className="absolute top-0 left-0 w-1 h-full bg-purple-500 z-10" />}
-              <div className={`absolute top-0 right-0 w-32 h-32 rounded-bl-full -mr-8 -mt-8 pointer-events-none ${isShared ? 'bg-gradient-to-br from-purple-500/20 to-transparent' : 'bg-gradient-to-br from-yellow-500/20 to-transparent'}`} />
+            let shareInfo = null;
+            const rules = goal.contributionRules as Record<string, number> | null;
+            let mySharePercentage = 100;
 
-              <CardHeader className="flex flex-row items-center justify-between pb-2 relative z-10">
-                <CardTitle className="text-lg font-bold text-foreground flex items-center gap-2">
-                   {isShared ? <Users className="w-5 h-5 text-purple-500" /> : <Trophy className="w-5 h-5 text-yellow-500" />}
-                   <span className="truncate">{goal.name}</span>
-                </CardTitle>
-                <div className="flex items-center gap-1">
-                    {isShared && <span className="text-[10px] font-bold bg-purple-500/10 text-purple-500 px-2 py-0.5 rounded uppercase mr-2">Conjunta</span>}
+            if (isShared && rules) {
+                if (rules[workspaceId] !== undefined) {
+                    mySharePercentage = rules[workspaceId];
+                } else if (Object.keys(rules).length > 0) {
+                     mySharePercentage = 0;
+                }
+            }
+
+            const mySaved = goal.transactions
+                .filter(t => t.workspaceId === workspaceId)
+                .reduce((acc, t) => {
+                    if (t.type === 'EXPENSE') return acc + t.amount;
+                    if (t.type === 'INCOME') return acc - t.amount;
+                    return acc;
+                }, 0);
+
+            if (isShared && mySharePercentage < 100 && mySharePercentage >= 0) {
+                 const myTarget = (target * mySharePercentage) / 100;
+                 shareInfo = {
+                     percentage: mySharePercentage,
+                     target: myTarget,
+                     saved: mySaved,
+                     totalTarget: target
+                 };
+            }
+
+            return (
+              <Card key={goal.id} className={`flex flex-col justify-between transition-all hover:shadow-md relative overflow-hidden ${isCompleted ? 'border-emerald-500/50 bg-emerald-50/10' : ''} ${isShared ? 'border-purple-500/30' : ''}`}>
+                {isShared && <div className="absolute left-0 top-0 bottom-0 w-1 bg-purple-500" />}
+                
+                <CardHeader className="pb-2">
+                  <div className="flex justify-between items-start gap-4">
+                    <div className="space-y-1 overflow-hidden">
+                      <div className="flex items-center gap-2">
+                          {isShared && <Users className="w-4 h-4 text-purple-500 shrink-0" />}
+                          <CardTitle className="text-lg font-semibold truncate leading-snug" title={goal.name}>
+                            {goal.name}
+                          </CardTitle>
+                      </div>
+                      
+                      <div className="text-sm text-muted-foreground flex items-center gap-1">
+                        {goal.deadline ? (
+                            <>
+                                <Calendar className="w-3 h-3 shrink-0" />
+                                <span>{goal.deadline.toLocaleDateString('pt-BR')} ({daysLeft} dias)</span>
+                            </>
+                        ) : (
+                            <span>Sem prazo definido</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className={`p-2 rounded-lg shrink-0 ${isCompleted ? 'bg-emerald-100 text-emerald-600' : (isShared ? 'bg-purple-100 text-purple-600' : 'bg-primary/10 text-primary')}`}>
+                      {isCompleted ? <Trophy className="w-5 h-5" /> : <Target className="w-5 h-5" />}
+                    </div>
+                  </div>
+                </CardHeader>
+                
+                <CardContent className="space-y-4 pt-2">
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Progresso Global</span>
+                      <span className="font-medium">{progress.toFixed(1)}%</span>
+                    </div>
+                    <Progress value={progress} className={`h-2 ${isShared ? "[&>div]:bg-purple-500" : ""}`} />
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-2xl font-bold text-foreground">
+                        {formatCurrency(current)}
+                      </span>
+                      <span className="text-sm text-muted-foreground">
+                        de {formatCurrency(target)}
+                      </span>
+                    </div>
                     
-                    <GoalInfoDialog goal={goal} />
+                    {shareInfo && (
+                        <div className="mt-2 p-2 bg-muted/50 rounded-md text-xs space-y-1 border border-border">
+                            <div className="flex items-center gap-1 text-purple-500 font-medium">
+                                <Users className="w-3 h-3" />
+                                <span>Sua Participação ({shareInfo.percentage}%)</span>
+                            </div>
+                            <div className="flex justify-between text-muted-foreground">
+                                <span>Sua Meta:</span>
+                                <span>{formatCurrency(shareInfo.target)}</span>
+                            </div>
+                            <div className="flex justify-between text-muted-foreground">
+                                <span>Você guardou:</span>
+                                <span className={shareInfo.saved >= shareInfo.target ? "text-emerald-500 font-bold" : ""}>
+                                    {formatCurrency(shareInfo.saved)}
+                                </span>
+                            </div>
+                        </div>
+                    )}
+                  </div>
+
+                  <div className="flex gap-2 pt-2 mt-auto items-center">
+                    <div className="flex-1">
+                        <DepositGoalModal goal={goal} accounts={accounts} type="DEPOSIT" />
+                    </div>
+                    
+                    <GoalInfoDialog goal={goal} myShare={shareInfo} />
+                    
+                    {(!isShared || isOwner) && (
+                        <GoalModal goal={goal} isShared={isShared} workspaces={workspaces} accounts={accounts} />
+                    )}
                     
                     {!isShared && (
-                        <>
-                            {/* MUDANÇA: Usando GoalModal para editar (passando a prop 'goal') */}
-                            <GoalModal goal={goal} />
-                            
-                            <form action={async () => { 'use server'; await deleteGoal(goal.id); }}>
-                                <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive"><Trash2 className="w-4 h-4" /></Button>
-                            </form>
-                        </>
+                        <form action={async () => { 'use server'; await deleteGoal(goal.id); }}>
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive">
+                                <Trash2 className="w-4 h-4" />
+                            </Button>
+                        </form>
                     )}
-                </div>
-              </CardHeader>
-              
-              <CardContent className="space-y-5 relative z-10">
-                <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                        <span className="text-muted-foreground">Guardado: <span className="text-foreground font-bold">{formatCurrency(current)}</span></span>
-                        <span className="text-muted-foreground">{percentage.toFixed(0)}%</span>
-                    </div>
-                    <Progress value={percentage} className={`h-3 bg-secondary ${isShared ? "[&>div]:bg-purple-500" : ""}`} />
-                    <p className="text-xs text-right text-muted-foreground">Meta: {formatCurrency(target)}</p>
-                </div>
-                <div className="flex gap-2">
-                    <div className="flex-1"><DepositGoalModal goal={goal} accounts={accountsClean} type="DEPOSIT" /></div>
-                    <div className="flex-1"><DepositGoalModal goal={goal} accounts={accountsClean} type="WITHDRAW" disabled={current <= 0} /></div>
-                </div>
-                {goal.deadline && (
-                    <div className="pt-4 border-t border-border flex items-center gap-2 text-xs text-muted-foreground">
-                        <Calendar className="w-3 h-3" />
-                        Meta para: {goal.deadline.toLocaleDateString('pt-BR')}
-                    </div>
-                )}
-              </CardContent>
-            </Card>
-          );
+                  </div>
+                </CardContent>
+              </Card>
+            );
         })}
 
-        {/* --- ESTADO VAZIO EXCLUSIVO (METAS) --- */}
         {goals.length === 0 && (
-           <div className="col-span-full flex flex-col items-center justify-center py-20 px-4 border border-yellow-500/20 rounded-2xl bg-gradient-to-b from-yellow-500/5 to-transparent text-muted-foreground">
+           <div className="col-span-full flex flex-col items-center justify-center py-20 px-4 border border-dashed border-border rounded-2xl bg-muted/20 text-muted-foreground">
               <div className="relative mb-4">
-                  <Target className="w-16 h-16 text-yellow-600 dark:text-yellow-500" />
-                  <Star className="w-6 h-6 text-yellow-300 absolute -top-1 -right-2 animate-pulse" />
+                  <Target className="w-16 h-16 text-muted-foreground/50" />
+                  <Star className="w-6 h-6 text-yellow-500 absolute -top-1 -right-2 animate-pulse" />
               </div>
               <h3 className="text-xl font-bold text-foreground mb-2">Qual é o seu próximo sonho?</h3>
               <p className="text-sm max-w-md text-center mb-8">
-                  Viagem, carro novo ou reserva de emergência? Crie uma meta e acompanhe seu progresso visualmente.
+                  Crie uma meta pessoal {isOwner && "ou compartilhe um objetivo com sua organização"}.
               </p>
-              {/* MUDANÇA: Usando GoalModal no estado vazio */}
-              <GoalModal />
+              <div className="flex gap-2">
+                 <GoalModal accounts={accounts} />
+                 {isOwner && <GoalModal isShared={true} workspaces={workspaces} />}
+              </div>
            </div>
         )}
       </div>

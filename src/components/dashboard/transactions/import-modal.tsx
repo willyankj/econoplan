@@ -1,16 +1,19 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Upload, FileSpreadsheet, Loader2, Check, FileText, ArrowRight, Settings2 } from "lucide-react";
-import { importTransactions } from '@/app/dashboard/actions';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { UploadCloud, FileText, Loader2, CheckCircle, ArrowRight, ArrowLeft, Table as TableIcon, Trash2, AlertTriangle, CheckSquare } from "lucide-react";
+import { importTransactions } from '@/app/dashboard/actions'; 
 import { toast } from "sonner";
-import { parseOFX, formatCurrency, getCSVPreview, parseCSVWithMapping } from '@/lib/utils'; 
+import { BankLogo } from "@/components/ui/bank-logo";
+import Papa from 'papaparse';
+import { parse as parseOfx } from 'ofx-js';
+import { formatCurrency } from "@/lib/utils";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
 
 interface ImportModalProps {
   accounts: any[];
@@ -20,172 +23,386 @@ interface ImportModalProps {
 export function ImportTransactionsModal({ accounts, categories }: ImportModalProps) {
   const [open, setOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [step, setStep] = useState(1);
+  
+  // Estado Geral
+  const [step, setStep] = useState<1 | 2 | 3>(1);
   const [file, setFile] = useState<File | null>(null);
   const [accountId, setAccountId] = useState("");
-  
-  const [csvContent, setCsvContent] = useState("");
-  const [csvPreview, setCsvPreview] = useState<string[][]>([]);
-  const [mapping, setMapping] = useState({ date: 0, description: 1, amount: 2, ignoreHeader: true });
-  const [parsedData, setParsedData] = useState<any[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const expenseCats = categories.filter(c => c.type === 'EXPENSE');
-  const incomeCats = categories.filter(c => c.type === 'INCOME');
+  // Estado Mapeamento
+  const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
+  const [mapping, setMapping] = useState({ date: '', description: '', amount: '', category: '' });
+
+  // Estado Revisão (Tabela)
+  const [parsedTransactions, setParsedTransactions] = useState<any[]>([]);
+
+  const resetState = () => {
+      setFile(null);
+      setAccountId("");
+      setStep(1);
+      setCsvHeaders([]);
+      setParsedTransactions([]);
+      setMapping({ date: '', description: '', amount: '', category: '' });
+      setIsLoading(false);
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) setFile(e.target.files[0]);
+    if (e.target.files && e.target.files[0]) handleFileSelection(e.target.files[0]);
   };
 
-  const handleParseFile = async () => {
-    if (!file) return toast.error("Selecione um arquivo");
-    setIsLoading(true);
-    try {
-        const text = await file.text();
-        const extension = file.name.split('.').pop()?.toLowerCase();
-        if (extension === 'ofx') {
-            const data = parseOFX(text);
-            finalizeParse(data);
-        } else if (extension === 'csv') {
-            setCsvContent(text);
-            setCsvPreview(getCSVPreview(text));
-            setStep(2);
-        } else throw new Error("Formato não suportado. Use .OFX ou .CSV");
-    } catch (e: any) {
-        toast.error(e.message || "Erro ao ler arquivo.");
-    } finally { setIsLoading(false); }
+  const handleDrop = (e: React.DragEvent) => {
+      e.preventDefault();
+      if (e.dataTransfer.files && e.dataTransfer.files[0]) handleFileSelection(e.dataTransfer.files[0]);
   };
 
-  const handleApplyMapping = () => {
-      try {
-          const data = parseCSVWithMapping(csvContent, mapping);
-          finalizeParse(data);
-      } catch (e) { toast.error("Erro ao processar CSV."); }
-  };
-
-  const finalizeParse = (data: any[]) => {
-      if (data.length === 0) { toast.error("Nenhuma transação encontrada."); return; }
-      const enrichedData = data.map((t: any, index: number) => ({
-          ...t, id: index, selected: true, categoryId: "default"
-      }));
-      setParsedData(enrichedData);
-      setStep(3);
-  };
-
-  const handleImport = async () => {
-      if (!accountId) return toast.error("Selecione a conta de destino.");
-      
-      const toImport = parsedData
-        .filter(item => item.selected)
-        .map(item => ({
-            date: item.date,
-            amount: item.amount,
-            description: item.description,
-            categoryId: item.categoryId === "default" ? undefined : item.categoryId,
-            externalId: item.externalId // <--- IMPORTANTE: Passando o ID do banco
-        }));
-
-      if (toImport.length === 0) return toast.error("Nenhuma transação selecionada.");
-
-      setIsLoading(true);
-      const result = await importTransactions(accountId, toImport);
-      setIsLoading(false);
-      
-      if (result?.error) toast.error(result.error);
-      else {
-          toast.success(`${toImport.length} itens processados!`);
-          setOpen(false);
-          setStep(1);
-          setFile(null);
-          setAccountId("");
-          setParsedData([]);
+  const handleFileSelection = async (selectedFile: File) => {
+      setFile(selectedFile);
+      if (selectedFile.name.toLowerCase().endsWith('.csv')) {
+          const text = await selectedFile.text();
+          Papa.parse(text, {
+              header: true, preview: 5, skipEmptyLines: true,
+              complete: (results) => {
+                  if (results.meta.fields) {
+                      setCsvHeaders(results.meta.fields);
+                      // Auto-mapeamento inteligente
+                      const initialMap = { date: '', description: '', amount: '', category: '' };
+                      results.meta.fields.forEach(h => {
+                          const lower = h.toLowerCase();
+                          if (['data','date','dt','dia'].some(k => lower.includes(k))) initialMap.date = h;
+                          else if (['desc','memo','hist','text'].some(k => lower.includes(k))) initialMap.description = h;
+                          else if (['valor','amount','total','vlr'].some(k => lower.includes(k))) initialMap.amount = h;
+                          else if (['cat','class'].some(k => lower.includes(k))) initialMap.category = h;
+                      });
+                      setMapping(initialMap);
+                  }
+              }
+          });
       }
   };
 
-  // Helpers de Tabela
-  const toggleSelection = (idx: number) => setParsedData(p => p.map((it, i) => i === idx ? { ...it, selected: !it.selected } : it));
-  const toggleAll = (chk: boolean) => setParsedData(p => p.map(it => ({ ...it, selected: chk })));
-  const updateCategory = (idx: number, cId: string) => setParsedData(p => p.map((it, i) => i === idx ? { ...it, categoryId: cId } : it));
-  const applyCategoryToAll = (cId: string) => setParsedData(p => p.map(it => ({ ...it, categoryId: cId })));
+  // --- HELPERS DE PARSE ---
+  const parseDate = (dateStr: string) => {
+      if (!dateStr) return null;
+      dateStr = dateStr.trim();
+      if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(dateStr)) {
+          const [d, m, y] = dateStr.split('/');
+          return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+      }
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
+      return null; 
+  };
 
-  const CategorySelect = ({ value, onChange, placeholder = "Automático" }: any) => (
-      <Select value={value} onValueChange={onChange}>
-        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder={placeholder} /></SelectTrigger>
-        <SelectContent>
-            <SelectItem value="default" className="text-muted-foreground italic">{placeholder}</SelectItem>
-            {expenseCats.length > 0 && <SelectGroup><SelectLabel>Despesas</SelectLabel>{expenseCats.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectGroup>}
-            {incomeCats.length > 0 && <SelectGroup><SelectLabel>Receitas</SelectLabel>{incomeCats.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectGroup>}
-        </SelectContent>
-      </Select>
-  );
+  const parseAmount = (val: string) => {
+      if (!val) return 0;
+      let clean = val.toString().replace(/[^\d.,-]/g, '');
+      if (clean.includes(',') && !clean.includes('.')) clean = clean.replace(',', '.');
+      else if (clean.includes('.') && clean.includes(',')) {
+          if (clean.indexOf('.') < clean.indexOf(',')) clean = clean.replace(/\./g, '').replace(',', '.');
+          else clean = clean.replace(/,/g, '');
+      }
+      return parseFloat(clean);
+  };
 
-  const maxCols = csvPreview.length > 0 ? Math.max(...csvPreview.map(r => r.length)) : 0;
-  const colIndexes = Array.from({ length: maxCols }, (_, i) => i);
+  // --- NAVEGAÇÃO ---
+  const handleNextStep = async () => {
+      if (step === 1) {
+          if (!file || !accountId) return toast.error("Selecione arquivo e conta.");
+          if (file.name.toLowerCase().endsWith('.csv')) setStep(2);
+          else processFile(); // OFX vai direto pro processamento
+      } else if (step === 2) {
+          if (!mapping.date || !mapping.amount || !mapping.description) return toast.error("Mapeie as colunas obrigatórias.");
+          processFile();
+      }
+  };
+
+  // Processa o arquivo (CSV ou OFX) e gera a lista para revisão
+  async function processFile() {
+    setIsLoading(true);
+    try {
+        const text = await file!.text();
+        let transactions: any[] = [];
+
+        if (file!.name.toLowerCase().endsWith('.csv')) {
+            Papa.parse(text, {
+                header: true, skipEmptyLines: true,
+                complete: (results) => {
+                    transactions = results.data.map((row: any, index) => {
+                        const dateVal = row[mapping.date];
+                        const amountVal = row[mapping.amount];
+                        if (!dateVal || !amountVal) return null;
+
+                        const pDate = parseDate(dateVal);
+                        const pAmount = parseAmount(amountVal);
+                        if (!pDate || isNaN(pAmount)) return null;
+
+                        return {
+                            id: index, // ID temporário para a tabela
+                            date: pDate,
+                            description: row[mapping.description] || "Sem descrição",
+                            amount: pAmount,
+                            categoryId: null, // Usuário escolhe na tabela
+                            categoryName: mapping.category ? row[mapping.category] : null
+                        };
+                    }).filter(Boolean);
+                    setParsedTransactions(transactions);
+                    setStep(3); // Vai para revisão
+                    setIsLoading(false);
+                }
+            });
+        } 
+        else if (file!.name.toLowerCase().endsWith('.ofx')) {
+            const data = await parseOfx(text);
+            const bankMsgs = data.OFX.BANKMSGSRSV1 || data.OFX.CREDITCARDMSGSRSV1;
+            const stmtTrn = bankMsgs?.STMTTRNRS?.STMTRS?.BANKTRANLIST?.STMTTRN || bankMsgs?.CCSTMTTRNRS?.CCSTMTRS?.BANKTRANLIST?.STMTTRN;
+            if (stmtTrn) {
+                const list = Array.isArray(stmtTrn) ? stmtTrn : [stmtTrn];
+                transactions = list.map((t: any, index) => ({
+                    id: index,
+                    date: t.DTPOSTED.slice(0, 8).replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3'),
+                    amount: parseFloat(t.TRNAMT),
+                    description: t.MEMO,
+                    externalId: t.FITID,
+                    categoryId: null
+                }));
+            }
+            setParsedTransactions(transactions);
+            setStep(3);
+            setIsLoading(false);
+        }
+    } catch (error) {
+        toast.error("Erro ao ler arquivo.");
+        setIsLoading(false);
+    }
+  }
+
+  // --- AÇÕES NA TABELA DE REVISÃO ---
+  const handleRemoveTransaction = (id: number) => {
+      setParsedTransactions(prev => prev.filter(t => t.id !== id));
+  };
+
+  const handleCategoryChange = (id: number, catId: string) => {
+      setParsedTransactions(prev => prev.map(t => t.id === id ? { ...t, categoryId: catId } : t));
+  };
+
+  const handleFinalImport = async () => {
+      setIsLoading(true);
+      const result = await importTransactions(accountId, parsedTransactions);
+      if (result?.error) toast.error(result.error);
+      else {
+          toast.success(`${parsedTransactions.length} transações importadas!`);
+          setOpen(false);
+          resetState();
+      }
+      setIsLoading(false);
+  };
+
+  const themeLightBg = "bg-orange-50 dark:bg-orange-950/20";
+  const themeColor = "text-orange-500";
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if(!v) resetState(); }}>
       <DialogTrigger asChild>
-        <Button variant="outline" className="gap-2 border-dashed">
-            <Upload className="w-4 h-4" /> <span className="hidden sm:inline">Importar</span>
+        <Button variant="outline" className="border-orange-200 text-orange-600 hover:bg-orange-50 dark:border-orange-900/50 dark:text-orange-400">
+            <UploadCloud className="w-4 h-4 mr-2" /> Importar
         </Button>
       </DialogTrigger>
-      <DialogContent className={step >= 2 ? "sm:max-w-4xl max-h-[90vh] flex flex-col" : "sm:max-w-[500px]"}>
-        <DialogHeader><DialogTitle>{step === 1 ? "Importar Extrato" : step === 2 ? "Mapear CSV" : "Revisão Final"}</DialogTitle></DialogHeader>
-
-        {step === 1 && (
-            <div className="grid gap-4 py-4">
-                <div className="border-2 border-dashed border-muted-foreground/25 rounded-lg p-8 flex flex-col items-center justify-center text-center hover:bg-muted/50 relative cursor-pointer">
-                    <input type="file" accept=".ofx,.csv" onChange={handleFileChange} className="absolute inset-0 opacity-0 cursor-pointer" />
-                    <div className="p-3 bg-muted rounded-full mb-3">{file ? <FileText className="w-6 h-6 text-emerald-600" /> : <FileSpreadsheet className="w-6 h-6 text-muted-foreground" />}</div>
-                    {file ? <div className="text-sm font-medium text-emerald-600 flex items-center gap-2"><Check className="w-4 h-4" /> {file.name}</div> : <div className="text-sm">Clique ou arraste seu arquivo<br/><span className="text-xs text-muted-foreground">OFX ou CSV</span></div>}
-                </div>
-                <Button onClick={handleParseFile} disabled={!file || isLoading} className="w-full">{isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Continuar"}</Button>
+      
+      <DialogContent className={`bg-card border-border text-card-foreground p-0 gap-0 rounded-xl overflow-hidden ${step === 3 ? 'sm:max-w-[800px]' : 'sm:max-w-[500px]'}`}>
+        
+        {/* HEADER COM STEPS */}
+        <div className={`p-6 pb-6 transition-colors duration-300 ${themeLightBg} flex flex-col items-center border-b border-orange-100 dark:border-orange-900/30`}>
+            <DialogHeader className="mb-2 w-full">
+                <DialogTitle className="text-center text-muted-foreground font-medium text-sm uppercase tracking-wider flex items-center justify-center gap-2">
+                    {step === 1 && "Passo 1: Upload"}
+                    {step === 2 && "Passo 2: Mapeamento"}
+                    {step === 3 && "Passo 3: Revisão"}
+                </DialogTitle>
+            </DialogHeader>
+            
+            {/* Progress Steps */}
+            <div className="flex items-center gap-2 mt-2">
+                <div className={`h-2 w-2 rounded-full ${step >= 1 ? 'bg-orange-500' : 'bg-muted'}`} />
+                <div className={`h-1 w-8 rounded-full ${step >= 2 ? 'bg-orange-500' : 'bg-muted'}`} />
+                <div className={`h-2 w-2 rounded-full ${step >= 2 ? 'bg-orange-500' : 'bg-muted'}`} />
+                <div className={`h-1 w-8 rounded-full ${step >= 3 ? 'bg-orange-500' : 'bg-muted'}`} />
+                <div className={`h-2 w-2 rounded-full ${step >= 3 ? 'bg-orange-500' : 'bg-muted'}`} />
             </div>
-        )}
+        </div>
 
-        {step === 2 && (
-            <div className="flex flex-col gap-6 h-full overflow-hidden">
-                <div className="grid grid-cols-3 gap-4 p-4 bg-muted/20 rounded-lg border border-border">
-                    {['DATA', 'DESCRIÇÃO', 'VALOR'].map((label, idx) => (
-                        <div key={label} className="space-y-2">
-                            <Label className="text-xs font-semibold uppercase text-muted-foreground">Coluna {label}</Label>
-                            <Select value={String(Object.values(mapping)[idx])} onValueChange={(v) => setMapping({...mapping, [Object.keys(mapping)[idx]]: Number(v)})}>
-                                <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
-                                <SelectContent>{colIndexes.map(i => <SelectItem key={i} value={String(i)}>Coluna {i}</SelectItem>)}</SelectContent>
-                            </Select>
+        <div className="p-6 space-y-6">
+            
+            {/* --- ETAPA 1: UPLOAD --- */}
+            {step === 1 && (
+                <div className="space-y-5">
+                    <div className="grid gap-1.5">
+                        <Label className="text-xs text-muted-foreground ml-1">Para qual conta?</Label>
+                        <Select value={accountId} onValueChange={setAccountId}>
+                            <SelectTrigger className="bg-muted/50 border-transparent h-11 w-full"><SelectValue placeholder="Selecione..." /></SelectTrigger>
+                            <SelectContent>
+                                {accounts.map(acc => (
+                                    <SelectItem key={acc.id} value={acc.id}>
+                                        <div className="flex items-center gap-2"><BankLogo bankName={acc.bank} className="w-4 h-4" />{acc.name}</div>
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+
+                    <div 
+                        className={`border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center cursor-pointer transition-all hover:bg-muted/50 ${file ? 'border-emerald-500 bg-emerald-50/10' : 'border-border'}`}
+                        onClick={() => fileInputRef.current?.click()}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={handleDrop}
+                    >
+                        <input ref={fileInputRef} type="file" accept=".ofx,.csv" className="hidden" onChange={handleFileChange} />
+                        {file ? (
+                            <div className="text-center space-y-2">
+                                <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto"><CheckCircle className="w-6 h-6" /></div>
+                                <p className="font-medium text-sm text-foreground">{file.name}</p>
+                                <p className="text-xs text-muted-foreground">{(file.size / 1024).toFixed(1)} KB</p>
+                            </div>
+                        ) : (
+                            <div className="text-center space-y-2">
+                                <div className="w-12 h-12 bg-muted text-muted-foreground rounded-full flex items-center justify-center mx-auto"><UploadCloud className="w-6 h-6" /></div>
+                                <p className="font-medium text-sm">Clique ou arraste seu arquivo aqui</p>
+                                <p className="text-xs text-muted-foreground">Suporta OFX e CSV</p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* --- ETAPA 2: MAPEAMENTO --- */}
+            {step === 2 && (
+                <div className="space-y-6">
+                    <div className="bg-blue-50/50 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900/30 p-4 rounded-lg flex gap-3">
+                        <TableIcon className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" />
+                        <div className="space-y-1">
+                            <p className="text-sm font-semibold text-blue-700 dark:text-blue-400">Identifique as colunas</p>
+                            <p className="text-xs text-blue-600/80 dark:text-blue-400/70">Para garantir que os dados entrem corretamente, nos diga o que cada coluna do seu CSV representa.</p>
                         </div>
-                    ))}
-                </div>
-                <div className="flex-1 border border-border rounded-md overflow-auto min-h-[200px]">
-                    <Table>
-                        <TableHeader className="bg-muted sticky top-0"><TableRow>{colIndexes.map(i => <TableHead key={i} className="whitespace-nowrap text-xs text-center border-r h-8">Coluna {i}</TableHead>)}</TableRow></TableHeader>
-                        <TableBody>{csvPreview.map((r, ri) => <TableRow key={ri} className={mapping.ignoreHeader && ri === 0 ? "opacity-40 line-through" : ""}>{colIndexes.map(ci => <TableCell key={ci} className="text-xs border-r py-2">{r[ci] || ""}</TableCell>)}</TableRow>)}</TableBody>
-                    </Table>
-                </div>
-                <div className="flex justify-between items-center pt-2">
-                    <div className="flex items-center space-x-2"><Checkbox id="header" checked={mapping.ignoreHeader} onCheckedChange={(c) => setMapping({...mapping, ignoreHeader: c as boolean})} /><Label htmlFor="header" className="text-sm cursor-pointer">Ignorar cabeçalho</Label></div>
-                    <div className="flex gap-2"><Button variant="ghost" onClick={() => setStep(1)}>Voltar</Button><Button onClick={handleApplyMapping} className="bg-purple-600 hover:bg-purple-500 text-white"><Settings2 className="w-4 h-4 mr-2" /> Revisar</Button></div>
-                </div>
-            </div>
-        )}
+                    </div>
 
-        {step === 3 && (
-            <div className="flex flex-col gap-4 overflow-hidden h-full">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-muted/20 p-3 rounded-lg border border-border">
-                    <div className="grid gap-1"><Label className="text-xs">Conta de Destino</Label><Select value={accountId} onValueChange={setAccountId}><SelectTrigger className="h-9"><SelectValue placeholder="Selecione..." /></SelectTrigger><SelectContent>{accounts.map(acc => <SelectItem key={acc.id} value={acc.id}>{acc.name} ({acc.bank})</SelectItem>)}</SelectContent></Select></div>
-                    <div className="grid gap-1"><Label className="text-xs">Aplicar Categoria em Tudo</Label><CategorySelect value="default" onChange={applyCategoryToAll} placeholder="Escolher para todos..." /></div>
+                    <div className="grid grid-cols-2 gap-6">
+                        <div className="space-y-4">
+                            <div className="grid gap-1.5">
+                                <Label className="text-xs font-bold text-orange-600 uppercase">Data *</Label>
+                                <Select value={mapping.date} onValueChange={(v) => setMapping({...mapping, date: v})}>
+                                    <SelectTrigger className="bg-muted/30"><SelectValue placeholder="Coluna de Data" /></SelectTrigger>
+                                    <SelectContent>{csvHeaders.map(h => <SelectItem key={h} value={h}>{h}</SelectItem>)}</SelectContent>
+                                </Select>
+                            </div>
+                            <div className="grid gap-1.5">
+                                <Label className="text-xs font-bold text-muted-foreground uppercase">Descrição *</Label>
+                                <Select value={mapping.description} onValueChange={(v) => setMapping({...mapping, description: v})}>
+                                    <SelectTrigger className="bg-muted/30"><SelectValue placeholder="Coluna de Descrição" /></SelectTrigger>
+                                    <SelectContent>{csvHeaders.map(h => <SelectItem key={h} value={h}>{h}</SelectItem>)}</SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+                        <div className="space-y-4">
+                            <div className="grid gap-1.5">
+                                <Label className="text-xs font-bold text-orange-600 uppercase">Valor *</Label>
+                                <Select value={mapping.amount} onValueChange={(v) => setMapping({...mapping, amount: v})}>
+                                    <SelectTrigger className="bg-muted/30"><SelectValue placeholder="Coluna de Valor" /></SelectTrigger>
+                                    <SelectContent>{csvHeaders.map(h => <SelectItem key={h} value={h}>{h}</SelectItem>)}</SelectContent>
+                                </Select>
+                            </div>
+                            <div className="grid gap-1.5">
+                                <Label className="text-xs font-bold text-muted-foreground uppercase">Categoria (Opcional)</Label>
+                                <Select value={mapping.category} onValueChange={(v) => setMapping({...mapping, category: v})}>
+                                    <SelectTrigger className="bg-muted/30"><SelectValue placeholder="Ignorar / Manual" /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="ignore">-- Definir Manualmente --</SelectItem>
+                                        {csvHeaders.map(h => <SelectItem key={h} value={h}>{h}</SelectItem>)}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                <div className="border border-border rounded-md flex-1 overflow-y-auto min-h-[300px]">
-                    <Table>
-                        <TableHeader className="bg-muted sticky top-0 z-10"><TableRow><TableHead className="w-[40px]"><Checkbox checked={parsedData.every(i => i.selected)} onCheckedChange={(c) => toggleAll(c as boolean)} /></TableHead><TableHead className="w-[100px]">Data</TableHead><TableHead>Descrição</TableHead><TableHead>Valor</TableHead><TableHead className="w-[180px]">Categoria</TableHead></TableRow></TableHeader>
-                        <TableBody>{parsedData.map((t, index) => <TableRow key={index} className={!t.selected ? "opacity-50 bg-muted/30" : ""}><TableCell><Checkbox checked={t.selected} onCheckedChange={() => toggleSelection(index)} /></TableCell><TableCell className="text-xs text-muted-foreground whitespace-nowrap">{new Date(t.date).toLocaleDateString('pt-BR')}</TableCell><TableCell className="text-xs font-medium max-w-[200px] truncate" title={t.description}>{t.description}</TableCell><TableCell className={`text-xs font-bold whitespace-nowrap ${t.amount >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{formatCurrency(t.amount)}</TableCell><TableCell>{t.selected && <CategorySelect value={t.categoryId} onChange={(val: string) => updateCategory(index, val)} />}</TableCell></TableRow>)}</TableBody>
-                    </Table>
+            )}
+
+            {/* --- ETAPA 3: REVISÃO (TABELA) --- */}
+            {step === 3 && (
+                <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                        <p className="text-sm text-muted-foreground">Revise os dados antes de importar. Você pode alterar categorias ou remover linhas.</p>
+                        <Badge variant="outline" className="bg-muted">{parsedTransactions.length} itens</Badge>
+                    </div>
+
+                    <div className="border rounded-lg max-h-[350px] overflow-y-auto relative scrollbar-thin">
+                        <Table>
+                            <TableHeader className="bg-muted/50 sticky top-0 z-10">
+                                <TableRow>
+                                    <TableHead className="w-[100px]">Data</TableHead>
+                                    <TableHead>Descrição</TableHead>
+                                    <TableHead className="w-[120px]">Valor</TableHead>
+                                    <TableHead className="w-[180px]">Categoria</TableHead>
+                                    <TableHead className="w-[50px]"></TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {parsedTransactions.map((t) => (
+                                    <TableRow key={t.id} className="hover:bg-muted/30">
+                                        <TableCell className="text-xs whitespace-nowrap">{new Date(t.date).toLocaleDateString('pt-BR')}</TableCell>
+                                        <TableCell className="text-xs truncate max-w-[200px]" title={t.description}>{t.description}</TableCell>
+                                        <TableCell className={`text-xs font-medium ${t.amount < 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
+                                            {formatCurrency(t.amount)}
+                                        </TableCell>
+                                        <TableCell>
+                                            <Select 
+                                                value={t.categoryId || "default"} 
+                                                onValueChange={(val) => handleCategoryChange(t.id, val)}
+                                            >
+                                                <SelectTrigger className="h-7 text-xs bg-transparent border-transparent hover:bg-muted hover:border-border focus:ring-0">
+                                                    <SelectValue placeholder="Selecione" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="default" disabled>Selecione...</SelectItem>
+                                                    {categories.map(cat => (
+                                                        <SelectItem key={cat.id} value={cat.id} className="text-xs">
+                                                            {cat.name}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </TableCell>
+                                        <TableCell>
+                                            <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-rose-500" onClick={() => handleRemoveTransaction(t.id)}>
+                                                <Trash2 className="w-3 h-3" />
+                                            </Button>
+                                        </TableCell>
+                                    </TableRow>
+                                ))}
+                            </TableBody>
+                        </Table>
+                    </div>
                 </div>
-                <div className="flex justify-between items-center border-t border-border pt-4 mt-auto">
-                    <div className="text-xs text-muted-foreground"><span className="font-bold text-foreground">{parsedData.filter(i => i.selected).length}</span> selecionados</div>
-                    <div className="flex gap-2"><Button variant="ghost" onClick={() => setStep(1)}>Cancelar</Button><Button onClick={handleImport} disabled={isLoading} className="bg-emerald-600 hover:bg-emerald-500 text-white gap-2">{isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Confirmar <ArrowRight className="w-4 h-4" /></>}</Button></div>
-                </div>
+            )}
+
+            {/* --- FOOTER / BOTÕES DE AÇÃO --- */}
+            <div className="flex gap-3 pt-2">
+                {step > 1 && (
+                    <Button variant="ghost" onClick={() => setStep(prev => (prev - 1) as any)} disabled={isLoading} className="text-muted-foreground">
+                        <ArrowLeft className="w-4 h-4 mr-2" /> Voltar
+                    </Button>
+                )}
+                
+                <Button 
+                    onClick={step === 3 ? handleFinalImport : handleNextStep} 
+                    disabled={isLoading || (step === 1 && (!file || !accountId))} 
+                    className={`flex-1 text-white font-bold h-11 shadow-md bg-orange-500 hover:bg-orange-600 transition-all`}
+                >
+                    {isLoading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : (
+                        step === 3 ? 'Confirmar e Salvar' : 'Continuar'
+                    )}
+                    {!isLoading && step < 3 && <ArrowRight className="w-4 h-4 ml-2" />}
+                </Button>
             </div>
-        )}
+        </div>
+
       </DialogContent>
     </Dialog>
   );
