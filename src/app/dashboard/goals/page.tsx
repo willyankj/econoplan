@@ -4,7 +4,7 @@ import { formatCurrency } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
-import { Target, Trophy, Users, Trash2, Calendar, Clock, ArrowRight, Plus, TrendingDown } from "lucide-react";
+import { Target, Trophy, Users, Trash2, Calendar, Clock, TrendingDown } from "lucide-react";
 import { GoalModal } from "@/components/dashboard/goals/goal-modal";
 import { DepositGoalModal } from "@/components/dashboard/goals/deposit-goal-modal";
 import { redirect } from "next/navigation";
@@ -49,14 +49,24 @@ export default async function GoalsPage() {
     transactions: g.transactions.map(t => ({...t, amount: Number(t.amount)}))
   }));
 
+  // --- CORREÇÃO 1: BUSCAR OS COFRINHOS (VAULTS) DENTRO DAS CONTAS ---
   const accountsRaw = await prisma.bankAccount.findMany({
     where: { workspaceId },
-    select: { id: true, name: true, bank: true, balance: true, workspace: { select: { name: true } } }
+    select: { 
+        id: true, 
+        name: true, 
+        bank: true, 
+        balance: true, 
+        vaults: true, // <--- Importante para o modal identificar os cofrinhos
+        workspace: { select: { name: true } } 
+    }
   });
   
   const accounts = accountsRaw.map(a => ({
       ...a, 
       balance: Number(a.balance), 
+      // Mapeia também o saldo dos vaults para número, se necessário
+      vaults: a.vaults.map(v => ({...v, balance: Number(v.balance)})),
       workspaceName: a.workspace.name
   }));
 
@@ -84,7 +94,6 @@ export default async function GoalsPage() {
             const progress = target > 0 ? Math.min((current / target) * 100, 100) : 0;
             const isCompleted = progress >= 100;
             
-            // --- CÁLCULOS CORRIGIDOS (IGNORANDO SALDO INICIAL NA MÉDIA) ---
             const today = new Date();
             const createdAt = new Date(goal.createdAt);
             const deadline = goal.deadline ? new Date(goal.deadline) : null;
@@ -92,19 +101,14 @@ export default async function GoalsPage() {
             const amountLeft = Math.max(0, target - current);
             const monthsSinceStart = Math.max(1, differenceInMonths(today, createdAt));
 
-            // 1. Calcula o Total REALMENTE Aportado (via transações)
-            // Isso remove o "Saldo Inicial" da conta de ritmo
             const netSavedFromTransactions = goal.transactions.reduce((acc, t) => {
                 if (goal.linkedAccountId) {
-                    // Meta Vinculada (Rastreador de Conta): Renda aumenta, Despesa diminui
                     return acc + (t.type === 'INCOME' ? t.amount : -t.amount);
                 } else {
-                    // Meta Manual (Cofrinho): Despesa (Depósito) aumenta, Renda (Resgate) diminui
                     return acc + (t.type === 'EXPENSE' ? t.amount : -t.amount);
                 }
             }, 0);
 
-            // 2. Média Real Baseada em Esforço (Aportes / Meses)
             const avgSavedPerMonth = netSavedFromTransactions / monthsSinceStart;
 
             let monthlyNeeded = 0;
@@ -115,7 +119,6 @@ export default async function GoalsPage() {
                 monthlyNeeded = amountLeft / monthsLeft;
             }
 
-            // Só projeta data se a pessoa estiver guardando algo positivo
             if (avgSavedPerMonth > 0 && amountLeft > 0) {
                 const monthsToFinish = amountLeft / avgSavedPerMonth;
                 projectionDate = addMonths(today, Math.ceil(monthsToFinish));
@@ -138,7 +141,6 @@ export default async function GoalsPage() {
                 daysLeft
             };
 
-            // Metas Compartilhadas (Lógica Mantida)
             const isShared = !!goal.tenantId;
             let shareInfo = null;
             const rules = goal.contributionRules as Record<string, number> | null;
@@ -170,7 +172,6 @@ export default async function GoalsPage() {
                  };
             }
 
-            // Estilos
             const cardBorderColor = healthStatus === 'completed' ? 'border-emerald-500/50' : (healthStatus === 'danger' ? 'border-rose-500/30' : 'border-border');
             const iconBg = isCompleted ? 'bg-emerald-100 text-emerald-600' : (isShared ? 'bg-purple-100 text-purple-600' : 'bg-blue-100 text-blue-600');
             const icon = isCompleted ? <Trophy className="w-5 h-5" /> : (isShared ? <Users className="w-5 h-5" /> : <Target className="w-5 h-5" />);
@@ -180,7 +181,8 @@ export default async function GoalsPage() {
               <Card key={goal.id} className={`flex flex-col justify-between transition-all hover:shadow-md relative overflow-hidden border ${cardBorderColor}`}>
                 {isShared && <div className="absolute left-0 top-0 bottom-0 w-1 bg-purple-500" />}
                 
-                <CardHeader className="pb-3 pl-5">
+                {/* CORREÇÃO 2: ADICIONADO 'pr-5' PARA EVITAR CORTE */}
+                <CardHeader className="pb-3 pl-5 pr-5">
                   <div className="flex justify-between items-start gap-3">
                     <div className="space-y-1 overflow-hidden flex-1">
                       <div className="flex items-center gap-2">
@@ -197,7 +199,6 @@ export default async function GoalsPage() {
                         ) : (
                             <span className="italic flex items-center gap-1"><Clock className="w-3 h-3" /> Sem prazo</span>
                         )}
-                        {/* Indicador discreto de tendência se a média for negativa (saques > depósitos) */}
                         {!isShared && avgSavedPerMonth < 0 && (
                             <span className="flex items-center gap-1 text-rose-500 font-medium">
                                 <TrendingDown className="w-3 h-3" /> Caindo
@@ -212,7 +213,8 @@ export default async function GoalsPage() {
                   </div>
                 </CardHeader>
                 
-                <CardContent className="space-y-5 pt-0 pl-5">
+                {/* CORREÇÃO 2: ADICIONADO 'pr-5' PARA EVITAR CORTE DO DELETE */}
+                <CardContent className="space-y-5 pt-0 pl-5 pr-5">
                   <div className="space-y-2">
                     <div className="flex justify-between items-end">
                         <span className="text-2xl font-bold text-foreground tracking-tight">
@@ -237,7 +239,6 @@ export default async function GoalsPage() {
                         <DepositGoalModal goal={goal} accounts={accounts} type="DEPOSIT" />
                     </div>
                     
-                    {/* Agora passando os insights corrigidos */}
                     <GoalInfoDialog goal={goal} myShare={shareInfo} insights={insights} />
                     
                     {(!isShared || isOwner) && (

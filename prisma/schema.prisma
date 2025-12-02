@@ -18,10 +18,7 @@ model Tenant {
   logoUrl            String?
   createdAt          DateTime    @default(now())
   updatedAt          DateTime    @updatedAt
-  
-  // Soft Delete
   deletedAt          DateTime?
-
   subscriptionStatus String      @default("TRIAL") 
   planType           String      @default("FREE")  
   nextPayment        DateTime?
@@ -39,10 +36,7 @@ model Workspace {
   name          String
   description   String?
   color         String?           @default("#000000")
-  
-  // Soft Delete
   deletedAt     DateTime?
-
   tenantId      String
   tenant        Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   
@@ -127,7 +121,7 @@ model Account {
   scope             String?
   id_token          String? @db.Text
   session_state     String?
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
   @@index([userId])
@@ -164,18 +158,42 @@ model BankAccount {
   workspaceId   String
   workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
  
-  transactions  Transaction[]
-  linkedGoals   Goal[]    @relation("LinkedAccount") 
+  transactions          Transaction[] // Transações onde esta conta é a ORIGEM
+  receivedTransfers     Transaction[] @relation("TransferRecipient") // Transações onde esta conta é o DESTINO
   
-  // --- NOVO: Cartões vinculados a esta conta ---
+  vaults        Vault[]
+  
   linkedCards   CreditCard[] @relation("CardLinkedAccount")
-  // --------------------------------------------
 
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
   @@index([workspaceId])
 }
+
+// --- NOVO MODELO: COFRINHO ---
+model Vault {
+  id            String      @id @default(uuid())
+  name          String
+  icon          String?     @default("PiggyBank")
+  color         String?     @default("#10b981") // Verde esmeralda padrão
+  balance       Decimal     @default(0)
+  targetAmount  Decimal?    // Meta opcional do cofrinho em si
+  
+  bankAccountId String
+  bankAccount   BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+  
+  // Uma meta pode estar vinculada a este cofrinho
+  goal          Goal?
+
+  transactions  Transaction[]
+
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([bankAccountId])
+}
+
 model Category {
   id            String          @id @default(uuid())
   name          String
@@ -213,21 +231,28 @@ model Transaction {
   frequency         TransactionFrequency @default(NONE)
   
   isInstallment     Boolean         @default(false)
-  installmentId     String?         
+  installmentId     String?
   installmentCurrent Int?
   installmentTotal   Int?       
   nextRecurringDate DateTime?
 
-  // --- NOVOS CAMPOS PARA CONTROLE DE IMPORTAÇÃO ---
-  externalId        String?         // ID único do banco (FITID do OFX)
-  importHash        String?         // Hash gerado (Data+Valor+Desc) para CSV
-  // ------------------------------------------------
+  externalId        String?
+  importHash        String?
 
   workspaceId       String
   workspace         Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   
+  // CONTA DE ORIGEM (Quem pagou ou enviou)
   bankAccountId     String?
   bankAccount       BankAccount?    @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+
+  // NOVO: CONTA DE DESTINO (Para transferências entre contas)
+  recipientAccountId String?
+  recipientAccount   BankAccount?   @relation("TransferRecipient", fields: [recipientAccountId], references: [id], onDelete: SetNull)
+  
+  // Vínculo com Cofrinho (para movimentações internas)
+  vaultId           String?
+  vault             Vault?          @relation(fields: [vaultId], references: [id], onDelete: SetNull)
   
   creditCardId      String?
   creditCard        CreditCard?     @relation(fields: [creditCardId], references: [id], onDelete: Cascade)
@@ -243,9 +268,11 @@ model Transaction {
 
   @@index([workspaceId])
   @@index([bankAccountId])
+  @@index([recipientAccountId]) // Index novo
   @@index([categoryId])
   @@index([creditCardId])
   @@index([goalId])
+  @@index([vaultId])
   @@index([installmentId])
   @@index([importHash]) 
 }
@@ -283,6 +310,8 @@ enum TransactionType {
   INCOME
   EXPENSE
   TRANSFER
+  VAULT_DEPOSIT   // Novo: Guardar no cofrinho
+  VAULT_WITHDRAW  // Novo: Resgatar do cofrinho
 }
 
 model CreditCard {
@@ -296,10 +325,8 @@ model CreditCard {
   workspaceId    String
   workspace      Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   
-  // --- NOVO: Conta vinculada (Débito Automático) ---
   linkedAccountId String?
   linkedAccount   BankAccount? @relation("CardLinkedAccount", fields: [linkedAccountId], references: [id])
-  // ------------------------------------------------
 
   transactions   Transaction[]
   
@@ -321,10 +348,9 @@ model Goal {
   tenantId      String?
   tenant        Tenant?    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   
-  // --- ADICIONE ESTAS LINHAS ---
-  linkedAccountId String?
-  linkedAccount   BankAccount? @relation("LinkedAccount", fields: [linkedAccountId], references: [id])
-  // -----------------------------
+  // Agora a meta olha para um Cofrinho, não para a conta inteira
+  vaultId       String?     @unique
+  vault         Vault?      @relation(fields: [vaultId], references: [id])
 
   transactions  Transaction[]
 

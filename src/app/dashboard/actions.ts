@@ -24,7 +24,10 @@ import {
   importTransactions as _importTransactions,
   stopTransactionRecurrence as _stopTransactionRecurrence,
   getRecurringTransactions as _getRecurringTransactions,
-  getUpcomingBills as _getUpcomingBills // <--- Certifique-se que este está aqui
+  getUpcomingBills as _getUpcomingBills,
+  upsertVault as _upsertVault,       // <--- NOVO
+  deleteVault as _deleteVault,       // <--- NOVO
+  transferVault as _transferVault    // <--- NOVO
 } from './actions/finance';
 
 import {
@@ -82,6 +85,9 @@ export const importTransactions = _importTransactions;
 export const stopTransactionRecurrence = _stopTransactionRecurrence;
 export const getRecurringTransactions = _getRecurringTransactions;
 export const getUpcomingBills = _getUpcomingBills;
+export const upsertVault = _upsertVault;       // <--- NOVO
+export const deleteVault = _deleteVault;       // <--- NOVO
+export const transferVault = _transferVault;   // <--- NOVO
 
 // Categories
 export const upsertCategory = _upsertCategory;

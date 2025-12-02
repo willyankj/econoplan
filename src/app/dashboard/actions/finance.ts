@@ -132,8 +132,12 @@ export async function upsertCard(formData: FormData, id?: string) {
     } else {
       const workspaceId = await getActiveWorkspaceId(user);
       if(!workspaceId) return { error: "Sem workspace" };
-      await prisma.creditCard.create({ data: { ...data, workspaceId } });
-      await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'CREATE', entity: 'Card', entityId: card.id, details: `Criou cartão ${data.name}` });
+      
+      // --- CORREÇÃO AQUI: Capturamos o cartão criado na variável 'newCard' ---
+      const newCard = await prisma.creditCard.create({ data: { ...data, workspaceId } });
+      
+      // Agora usamos newCard.id (antes estava card.id que não existia)
+      await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'CREATE', entity: 'Card', entityId: newCard.id, details: `Criou cartão ${data.name}` });
     }
   } catch (e) { return { error: "Erro ao salvar cartão." }; }
   
@@ -167,7 +171,6 @@ export async function payCreditCardInvoice(formData: FormData) {
   if(!card) return { error: "Cartão inválido" };
 
   try {
-      // 1. Calcular o total real pendente até a data informada para validação de segurança
       const pendingTransactions = await prisma.transaction.aggregate({
           where: { creditCardId: cardId, isPaid: false, date: { lte: date } },
           _sum: { amount: true }
@@ -175,8 +178,6 @@ export async function payCreditCardInvoice(formData: FormData) {
       
       const totalPending = Number(pendingTransactions._sum.amount || 0);
       
-      // Permitimos uma margem de erro pequena (ex: 0.50) para arredondamentos, 
-      // mas impedimos pagar 1 real para quitar 5000.
       if (Math.abs(totalPending - amount) > 1.0) {
            return { error: `O valor do pagamento (R$ ${amount}) diverge do total da fatura (R$ ${totalPending}).` };
       }
@@ -189,7 +190,6 @@ export async function payCreditCardInvoice(formData: FormData) {
       await prisma.$transaction([
           prisma.transaction.create({ data: { description: `Fatura - ${card.name}`, amount, type: "EXPENSE", date, workspaceId: card.workspaceId, bankAccountId: accountId, categoryId: category.id, isPaid: true } }),
           prisma.bankAccount.update({ where: { id: accountId }, data: { balance: { decrement: amount } } }),
-          // Segurança: Só marca como pago as transações que validamos acima
           prisma.transaction.updateMany({ where: { creditCardId: cardId, isPaid: false, date: { lte: date } }, data: { isPaid: true } })
       ]);
 
@@ -199,6 +199,8 @@ export async function payCreditCardInvoice(formData: FormData) {
   revalidatePath('/dashboard');
   return { success: true };
 }
+
+// --- TRANSAÇÕES GERAIS (INCOME, EXPENSE, TRANSFER) ---
 
 export async function upsertTransaction(formData: FormData, id?: string) {
   const permission = id ? 'transactions_edit' : 'transactions_create';
@@ -221,29 +223,36 @@ export async function upsertTransaction(formData: FormData, id?: string) {
   }
   if (!workspaceId) return { error: "Workspace inválido" };
 
-  // --- LÓGICA DE TRANSFERÊNCIA ---
+  // --- LÓGICA DE TRANSFERÊNCIA (AGORA UNIFICADA) ---
   if (type === 'TRANSFER') {
-      if (!accountId || !destinationAccountId) return { error: "Selecione as duas contas." };
-      if (accountId === destinationAccountId) return { error: "Contas devem ser diferentes." };
+      if (!accountId || !destinationAccountId) return { error: "Selecione as contas de origem e destino." };
+      if (accountId === destinationAccountId) return { error: "As contas devem ser diferentes." };
 
       try {
           await prisma.$transaction(async (tx) => {
-              await tx.transaction.create({
-                  data: {
-                      description: `Transferência para: ${description || 'Conta Destino'}`,
-                      amount, type: 'EXPENSE', date: baseDate, workspaceId, bankAccountId: accountId, isPaid: true,
-                      category: { connectOrCreate: { where: { workspaceId_name_type: { workspaceId, name: "Transferência Enviada", type: "EXPENSE" } }, create: { name: "Transferência Enviada", type: "EXPENSE", workspaceId, icon: "ArrowRightLeft", color: "#3b82f6" } } }
-                  }
-              });
-              await tx.bankAccount.update({ where: { id: accountId }, data: { balance: { decrement: amount } } });
+              // Busca nomes das contas para descrição automática
+              const sourceAcc = await tx.bankAccount.findUnique({ where: { id: accountId } });
+              const destAcc = await tx.bankAccount.findUnique({ where: { id: destinationAccountId } });
 
+              if (!sourceAcc || !destAcc) throw new Error("Contas não encontradas.");
+
+              // Cria UMA transação vinculando as duas contas
               await tx.transaction.create({
                   data: {
-                      description: `Recebido de: ${description || 'Conta Origem'}`,
-                      amount, type: 'INCOME', date: baseDate, workspaceId, bankAccountId: destinationAccountId, isPaid: true,
-                      category: { connectOrCreate: { where: { workspaceId_name_type: { workspaceId, name: "Transferência Recebida", type: "INCOME" } }, create: { name: "Transferência Recebida", type: "INCOME", workspaceId, icon: "ArrowRightLeft", color: "#3b82f6" } } }
+                      description: `Transferência: ${sourceAcc.name} > ${destAcc.name}`,
+                      amount, 
+                      type: 'TRANSFER', 
+                      date: baseDate, 
+                      workspaceId, 
+                      bankAccountId: accountId, // Origem
+                      recipientAccountId: destinationAccountId, // Destino
+                      isPaid: true,
+                      category: { connectOrCreate: { where: { workspaceId_name_type: { workspaceId, name: "Transferência", type: "TRANSFER" } }, create: { name: "Transferência", type: "TRANSFER", workspaceId, icon: "ArrowRightLeft", color: "#64748b" } } }
                   }
               });
+
+              // Atualiza os saldos
+              await tx.bankAccount.update({ where: { id: accountId }, data: { balance: { decrement: amount } } });
               await tx.bankAccount.update({ where: { id: destinationAccountId }, data: { balance: { increment: amount } } });
           });
           revalidatePath('/dashboard');
@@ -251,7 +260,7 @@ export async function upsertTransaction(formData: FormData, id?: string) {
       } catch (e) { return { error: "Erro na transferência." }; }
   }
 
-  // --- RESOLUÇÃO DE CATEGORIA ---
+  // --- LÓGICA PADRÃO (INCOME/EXPENSE) ---
   let catId = parsed.data.categoryId;
   if (!catId && categoryName) {
       const cat = await prisma.category.upsert({
@@ -268,27 +277,22 @@ export async function upsertTransaction(formData: FormData, id?: string) {
       catId = cat.id;
   }
 
-  // --- CORREÇÃO 1: EDIÇÃO DE TRANSAÇÃO (ATUALIZAR SALDO) ---
+  // Edição (Simplificada: não suporta mudar tipo de TRANSFER para INCOME por enquanto para evitar complexidade de saldo)
   if (id) {
       try {
           await prisma.$transaction(async (tx) => {
               const oldT = await tx.transaction.findUnique({ where: { id } });
               if (!oldT) throw new Error("Transação original não encontrada");
 
-              // Atualiza a transação
               await tx.transaction.update({ 
                   where: { id }, 
                   data: { description, amount, date: baseDate, categoryId: catId } 
               });
 
-              // Se a transação já estava paga e vinculada a uma conta, precisamos corrigir o saldo
-              if (oldT.isPaid && oldT.bankAccountId) {
+              // Ajuste de saldo na edição
+              if (oldT.isPaid && oldT.bankAccountId && oldT.type !== 'TRANSFER') {
                   const diff = amount - Number(oldT.amount);
-                  
                   if (diff !== 0) {
-                      // Se for RECEITA: Aumentou o valor -> Aumenta saldo (increment diff)
-                      // Se for DESPESA: Aumentou o valor -> Diminui saldo (decrement diff)
-                      // O Prisma suporta 'increment' com números negativos, mas vamos ser explícitos.
                       if (oldT.type === 'INCOME') {
                           await tx.bankAccount.update({ where: { id: oldT.bankAccountId }, data: { balance: { increment: diff } } });
                       } else if (oldT.type === 'EXPENSE') {
@@ -298,39 +302,24 @@ export async function upsertTransaction(formData: FormData, id?: string) {
               }
           });
           return { success: true };
-      } catch (e) {
-          return { error: "Erro ao atualizar transação." };
-      }
+      } catch (e) { return { error: "Erro ao atualizar transação." }; }
   }
 
+  // Criação (INCOME/EXPENSE)
   const isInstallment = recurrence === 'INSTALLMENT' && (installments || 0) > 1;
   const isRecurring = ['MONTHLY', 'WEEKLY', 'YEARLY'].includes(recurrence || '');
 
   try {
       await prisma.$transaction(async (tx) => {
           
-          let goalIdToLink = null;
-          if (paymentMethod === 'ACCOUNT' && accountId) {
-              const linkedGoal = await tx.goal.findFirst({ where: { linkedAccountId: accountId } });
-              if (linkedGoal) {
-                  goalIdToLink = linkedGoal.id;
-                  const op = type === 'INCOME' ? 'increment' : 'decrement';
-                  await tx.goal.update({ where: { id: linkedGoal.id }, data: { currentAmount: { [op]: amount } } });
-              }
-          }
-
           if (isInstallment && cardId) {
               const installmentGroupId = uuidv4();
               const totalInstallments = installments || 1;
-              
-              // --- CORREÇÃO 2: ARREDONDAMENTO DE PARCELAS ---
-              // Ex: 100 reais em 3x. 33.33, 33.33, 33.34.
               const rawInstallmentValue = Math.floor((amount / totalInstallments) * 100) / 100;
               const firstInstallmentValue = Number((amount - (rawInstallmentValue * (totalInstallments - 1))).toFixed(2));
 
               for (let i = 0; i < totalInstallments; i++) {
                   const installmentDate = addMonths(baseDate, i);
-                  // A primeira parcela absorve a diferença de centavos
                   const currentAmount = i === 0 ? firstInstallmentValue : rawInstallmentValue;
 
                   await tx.transaction.create({
@@ -363,8 +352,7 @@ export async function upsertTransaction(formData: FormData, id?: string) {
                       bankAccountId: paymentMethod === 'ACCOUNT' ? accountId : null,
                       creditCardId: paymentMethod === 'CREDIT_CARD' ? cardId : null,
                       categoryId: catId, isPaid: paymentMethod === 'ACCOUNT',
-                      isRecurring: true, nextRecurringDate: nextDate, frequency: recurrence as any,
-                      goalId: goalIdToLink
+                      isRecurring: true, nextRecurringDate: nextDate, frequency: recurrence as any
                   }
               });
               if (paymentMethod === 'ACCOUNT' && accountId) {
@@ -377,8 +365,7 @@ export async function upsertTransaction(formData: FormData, id?: string) {
                       description, amount, type: type as any, date: baseDate, workspaceId,
                       bankAccountId: paymentMethod === 'ACCOUNT' ? accountId : null,
                       creditCardId: paymentMethod === 'CREDIT_CARD' ? cardId : null,
-                      categoryId: catId, isPaid: paymentMethod === 'ACCOUNT', isRecurring: false, frequency: 'NONE',
-                      goalId: goalIdToLink
+                      categoryId: catId, isPaid: paymentMethod === 'ACCOUNT', isRecurring: false, frequency: 'NONE'
                   }
               });
                if (paymentMethod === 'ACCOUNT' && accountId) {
@@ -398,25 +385,46 @@ export async function deleteTransaction(id: string) {
   const { user, error } = await validateUser('transactions_delete');
   if (error || !user) return { error };
 
-  const t = await prisma.transaction.findUnique({ where: { id }, include: { goal: true } }); 
+  const t = await prisma.transaction.findUnique({ where: { id }, include: { goal: true, vault: true } }); 
   if (!t) return { error: "Não encontrado" };
 
   try {
     await prisma.$transaction(async (tx) => {
+        // Reverter Saldo: Conta Bancária (Origem)
         if (t.isPaid && t.bankAccountId) {
-            const op = t.type === 'INCOME' ? 'decrement' : 'increment';
-            await tx.bankAccount.update({ where: { id: t.bankAccountId }, data: { balance: { [op]: t.amount } } });
+            if (t.type === 'INCOME') {
+                await tx.bankAccount.update({ where: { id: t.bankAccountId }, data: { balance: { decrement: t.amount } } });
+            } else if (t.type === 'EXPENSE') {
+                await tx.bankAccount.update({ where: { id: t.bankAccountId }, data: { balance: { increment: t.amount } } });
+            } else if (t.type === 'TRANSFER' && t.recipientAccountId) {
+                // Se era transferência, devolve para a origem
+                await tx.bankAccount.update({ where: { id: t.bankAccountId }, data: { balance: { increment: t.amount } } });
+            } else if (t.type === 'VAULT_DEPOSIT') {
+                // Devolve para a conta
+                await tx.bankAccount.update({ where: { id: t.bankAccountId }, data: { balance: { increment: t.amount } } });
+            } else if (t.type === 'VAULT_WITHDRAW') {
+                // Tira da conta
+                await tx.bankAccount.update({ where: { id: t.bankAccountId }, data: { balance: { decrement: t.amount } } });
+            }
         }
 
-        if (t.isPaid && t.goalId) {
-            const isLinked = t.goal?.linkedAccountId === t.bankAccountId;
-            let goalOp;
-            if (isLinked) {
-                goalOp = t.type === 'INCOME' ? 'decrement' : 'increment';
-            } else {
-                goalOp = t.type === 'EXPENSE' ? 'decrement' : 'increment';
+        // Reverter Saldo: Conta Destino (Transferência)
+        if (t.isPaid && t.recipientAccountId && t.type === 'TRANSFER') {
+            await tx.bankAccount.update({ where: { id: t.recipientAccountId }, data: { balance: { decrement: t.amount } } });
+        }
+
+        // Reverter Saldo: Cofrinho/Meta
+        if (t.isPaid && t.vaultId) {
+            if (t.type === 'VAULT_DEPOSIT') {
+                await tx.vault.update({ where: { id: t.vaultId }, data: { balance: { decrement: t.amount } } });
+            } else if (t.type === 'VAULT_WITHDRAW') {
+                await tx.vault.update({ where: { id: t.vaultId }, data: { balance: { increment: t.amount } } });
             }
-            await tx.goal.update({ where: { id: t.goalId }, data: { currentAmount: { [goalOp]: t.amount } } });
+            // Sincroniza meta se houver
+            const vault = await tx.vault.findUnique({ where: { id: t.vaultId }, include: { goal: true } });
+            if (vault && vault.goal) {
+                await tx.goal.update({ where: { id: vault.goal.id }, data: { currentAmount: vault.balance } });
+            }
         }
 
         if (t.isInstallment && t.installmentId) {
@@ -433,7 +441,6 @@ export async function deleteTransaction(id: string) {
   return { success: true };
 }
 
-// --- CORREÇÃO 4: PERFORMANCE DA IMPORTAÇÃO (BATCHING) ---
 export async function importTransactions(accountId: string, transactions: any[]) {
     const { user, error } = await validateUser('transactions_create');
     if (error || !user) return { error };
@@ -444,21 +451,13 @@ export async function importTransactions(accountId: string, transactions: any[])
         const validTransactions = transactions.filter(t => t.date && !isNaN(Number(t.amount)) && t.description);
         if (validTransactions.length === 0) return { error: "Nenhuma transação válida." };
 
-        // 1. Preparar dados
         const txsToProcess = validTransactions.map(t => {
             const date = new Date(t.date);
             const absAmount = Math.abs(Number(t.amount));
             const importHash = t.externalId ? null : generateTransactionHash(date, absAmount, t.description);
-            return {
-                ...t,
-                date,
-                absAmount,
-                type: t.amount >= 0 ? 'INCOME' : 'EXPENSE',
-                importHash
-            };
+            return { ...t, date, absAmount, type: t.amount >= 0 ? 'INCOME' : 'EXPENSE', importHash };
         });
 
-        // 2. Buscar duplicatas em Lote (Bulk Read)
         const hashes = txsToProcess.filter(t => t.importHash).map(t => t.importHash);
         const externalIds = txsToProcess.filter(t => t.externalId).map(t => t.externalId);
 
@@ -484,15 +483,11 @@ export async function importTransactions(accountId: string, transactions: any[])
 
         if (newTxs.length === 0) return { success: true, message: "Todas duplicadas." };
 
-        // 3. Resolver Categorias
-        // (Simplificado: Cria uma categoria "Importados" única se não vier especificada, para evitar N+1 em categories)
-        // Se precisar de categorização individual complexa, ideal fazer em dois passos, mas aqui vamos otimizar o fluxo principal.
         const defaultCat = await prisma.category.upsert({
             where: { workspaceId_name_type: { workspaceId: account.workspaceId, name: "Importados", type: "EXPENSE" } },
             update: {}, create: { name: "Importados", type: "EXPENSE", workspaceId: account.workspaceId }
         });
 
-        // 4. Criação em Massa (CreateMany)
         await prisma.transaction.createMany({
             data: newTxs.map(t => ({
                 description: t.description,
@@ -508,7 +503,6 @@ export async function importTransactions(accountId: string, transactions: any[])
             }))
         });
 
-        // 5. Atualizar Saldo (Única Query)
         const totalIncome = newTxs.filter(t => t.type === 'INCOME').reduce((acc, t) => acc + t.absAmount, 0);
         const totalExpense = newTxs.filter(t => t.type === 'EXPENSE').reduce((acc, t) => acc + t.absAmount, 0);
         const netChange = totalIncome - totalExpense;
@@ -547,7 +541,6 @@ export async function getRecurringTransactions() {
   return recurrings.map(t => ({ ...t, amount: Number(t.amount), date: t.date.toISOString(), nextRecurringDate: t.nextRecurringDate?.toISOString(), createdAt: t.createdAt.toISOString(), updatedAt: t.updatedAt.toISOString() }));
 }
 
-// --- CORREÇÃO 5: LÓGICA DE CONTAS A PAGAR ---
 export async function getUpcomingBills() {
   const { user, error } = await validateUser(); if (error || !user) return []; const workspaceId = await getActiveWorkspaceId(user); if (!workspaceId) return [];
   const today = new Date(); today.setHours(0, 0, 0, 0); const limitDate = addDays(today, 30); 
@@ -558,29 +551,241 @@ export async function getUpcomingBills() {
   const cardBills = cards.map(card => {
     const currentYear = today.getFullYear(); 
     const currentMonth = today.getMonth(); 
-    
-    // Calcula a data de vencimento deste mês
     let dueDate = new Date(currentYear, currentMonth, card.dueDay);
-
-    // Se hoje já passou da data de fechamento, a fatura em aberto refere-se ao próximo vencimento?
-    // Depende: se tivermos transações não pagas "antigas" (antes do fechamento), elas estão atrasadas no vencimento atual.
-    // Se só tivermos transações "novas" (após fechamento), elas são para o próximo mês.
-    // Lógica simplificada segura: Se hoje é maior que o dia do fechamento, assumimos o próximo mês, 
-    // EXCETO se houver transações antigas pendentes.
-    
-    // Verifica se existe alguma transação pendente com data ANTERIOR ou IGUAL ao fechamento deste mês
     const closingDateThisMonth = new Date(currentYear, currentMonth, card.closingDay);
     const hasOldPending = card.transactions.some(t => t.date <= closingDateThisMonth);
 
     if (today.getDate() > card.closingDay && !hasOldPending) {
          dueDate = addMonths(dueDate, 1);
     }
-    // Se today > closingDay MAS tem pendência antiga, mantém dueDate original (que vai aparecer como Atrasada/Hoje)
-
     const total = card.transactions.reduce((acc, t) => acc + Number(t.amount), 0);
     return { id: card.id, description: `Fatura ${card.name}`, amount: total, date: dueDate, isCard: true, bank: card.bank, category: { name: 'Cartão de Crédito', icon: 'CreditCard', color: '#64748b' } };
   }).filter(c => c.amount > 0 && c.date <= limitDate);
 
   const allBills = [ ...bills.map(b => ({ id: b.id, description: b.description, amount: Number(b.amount), date: b.date, category: b.category ? { name: b.category.name, icon: b.category.icon || undefined, color: b.category.color || undefined } : undefined, isCard: false, bank: undefined })), ...cardBills ].sort((a, b) => a.date.getTime() - b.date.getTime());
   return allBills.map(b => ({ ...b, date: b.date.toISOString() }));
+}
+
+// --------------------------------------------------------
+// --- MÓDULO DE COFRINHOS E METAS (ATUALIZADO) ---
+// --------------------------------------------------------
+
+const VaultSchema = z.object({
+  name: z.string().min(1, "Nome do cofrinho é obrigatório"),
+  bankAccountId: z.string().uuid("Conta bancária inválida"),
+  targetAmount: z.coerce.number().optional(),
+  initialBalance: z.coerce.number().optional(),
+});
+
+export async function upsertVault(formData: FormData, id?: string) {
+  const { user, error } = await validateUser();
+  if (error || !user) return { error };
+
+  const parsed = VaultSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: "Dados inválidos" };
+  const { name, bankAccountId, targetAmount, initialBalance } = parsed.data;
+
+  try {
+    if (id) {
+      await prisma.vault.update({ 
+        where: { id }, 
+        data: { name, targetAmount } 
+      });
+      await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'UPDATE', entity: 'Vault', entityId: id, details: `Atualizou cofrinho ${name}` });
+    } else {
+      await prisma.$transaction(async (tx) => {
+          const startBalance = initialBalance || 0;
+          const account = await tx.bankAccount.findUnique({ where: { id: bankAccountId } });
+          if (!account) throw new Error("Conta não encontrada");
+
+          const vault = await tx.vault.create({
+            data: { 
+                name, 
+                bankAccountId, 
+                targetAmount, 
+                balance: startBalance 
+            }
+          });
+          // SEM TRANSAÇÃO PARA SALDO INICIAL (OPENING BALANCE)
+          
+          await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'CREATE', entity: 'Vault', entityId: vault.id, details: `Criou cofrinho ${name}` });
+      });
+    }
+  } catch (e: any) { return { error: e.message || "Erro ao salvar cofrinho." }; }
+
+  revalidatePath('/dashboard');
+  revalidatePath(`/dashboard/accounts`);
+  return { success: true };
+}
+
+export async function deleteVault(id: string) {
+    const { user, error } = await validateUser();
+    if (error || !user) return { error };
+
+    const vault = await prisma.vault.findUnique({ where: { id } });
+    if (!vault) return { error: "Cofrinho não encontrado" };
+
+    if (Number(vault.balance) > 0) return { error: "O cofrinho precisa estar vazio para ser excluído. Resgate o valor primeiro." };
+
+    try {
+        await prisma.vault.delete({ where: { id } });
+        await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'DELETE', entity: 'Vault', details: `Excluiu cofrinho ${vault.name}` });
+    } catch (e) { return { error: "Erro ao excluir." }; }
+
+    revalidatePath('/dashboard');
+    return { success: true };
+}
+
+// --- LÓGICA DE APORTE UNIFICADA ---
+export async function transferVault(vaultId: string, amount: number, type: 'DEPOSIT' | 'WITHDRAW') {
+  const { user, error } = await validateUser();
+  if (error || !user) return { error };
+
+  if (amount <= 0) return { error: "Valor deve ser maior que zero." };
+
+  const vault = await prisma.vault.findUnique({ 
+    where: { id: vaultId },
+    include: { bankAccount: true, goal: true } 
+  });
+  
+  if (!vault) return { error: "Cofrinho não encontrado" };
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const isDeposit = type === 'DEPOSIT';
+      
+      if (isDeposit) {
+        if (Number(vault.bankAccount.balance) < amount) throw new Error("Saldo insuficiente na conta corrente.");
+      } else {
+        if (Number(vault.balance) < amount) throw new Error("Saldo insuficiente no cofrinho.");
+      }
+
+      const accountOp = isDeposit ? 'decrement' : 'increment';
+      await tx.bankAccount.update({
+          where: { id: vault.bankAccountId },
+          data: { balance: { [accountOp]: amount } }
+      });
+
+      const vaultOp = isDeposit ? 'increment' : 'decrement';
+      const updatedVault = await tx.vault.update({
+        where: { id: vaultId },
+        data: { balance: { [vaultOp]: amount } }
+      });
+
+      if (vault.goal) {
+        await tx.goal.update({
+            where: { id: vault.goal.id },
+            data: { currentAmount: updatedVault.balance }
+        });
+      }
+
+      const txType = isDeposit ? 'VAULT_DEPOSIT' : 'VAULT_WITHDRAW';
+      
+      // DESCRIÇÕES AUTOEXPLICATIVAS
+      let description = "";
+      if (isDeposit) {
+          description = `Aporte: ${vault.bankAccount.name} > Cofrinho ${vault.name}`;
+      } else {
+          description = `Resgate: Cofrinho ${vault.name} > ${vault.bankAccount.name}`;
+      }
+
+      await tx.transaction.create({
+        data: {
+          description,
+          amount,
+          type: txType,
+          date: new Date(),
+          workspaceId: vault.bankAccount.workspaceId,
+          bankAccountId: vault.bankAccountId,
+          vaultId: vault.id,
+          isPaid: true,
+          // Sem categoria para não poluir
+        }
+      });
+    });
+
+    revalidatePath('/dashboard');
+    return { success: true };
+
+  } catch (e: any) {
+    return { error: e.message || "Erro na movimentação." };
+  }
+}
+
+const GoalSchema = z.object({
+    name: z.string().min(1),
+    targetAmount: z.coerce.number().positive(),
+    deadline: z.string().optional(),
+    vaultId: z.string().optional(),
+    createVault: z.string().optional(),
+    newVaultName: z.string().optional(),
+    newVaultAccountId: z.string().optional(),
+    contributionRules: z.string().optional(),
+});
+
+export async function upsertGoal(formData: FormData, id?: string, isShared = false) {
+    const { user, error } = await validateUser('goals_create');
+    if (error || !user) return { error };
+
+    const parsed = GoalSchema.safeParse(Object.fromEntries(formData));
+    if (!parsed.success) return { error: "Dados inválidos" };
+    
+    const { name, targetAmount, deadline, vaultId, createVault, newVaultName, newVaultAccountId, contributionRules } = parsed.data;
+    const workspaceId = await getActiveWorkspaceId(user);
+    
+    let finalVaultId = vaultId;
+
+    try {
+        await prisma.$transaction(async (tx) => {
+            // Se optou por criar um cofrinho novo AGORA
+            if (createVault === "true") {
+                if (!newVaultName || !newVaultAccountId) throw new Error("Para criar um novo cofrinho, informe nome e conta.");
+                
+                const newVault = await tx.vault.create({
+                    data: {
+                        name: newVaultName,
+                        bankAccountId: newVaultAccountId,
+                        targetAmount: targetAmount, // O cofrinho herda a meta
+                        balance: 0
+                    }
+                });
+                finalVaultId = newVault.id;
+            }
+
+            // Validação: Meta precisa de cofrinho (a menos que seja compartilhada complexa, mas vamos focar no padrão)
+            if (!isShared && (!finalVaultId || finalVaultId === 'none')) {
+                throw new Error("É obrigatório vincular a meta a um cofrinho.");
+            }
+
+            // Pega o saldo atual do cofrinho para garantir sincronia
+            let currentBalance = 0;
+            if (finalVaultId) {
+                const vault = await tx.vault.findUnique({ where: { id: finalVaultId } });
+                if (vault) currentBalance = Number(vault.balance);
+            }
+
+            const data: any = {
+                name,
+                targetAmount,
+                currentAmount: currentBalance, // Sincronizado com o cofrinho
+                deadline: deadline ? new Date(deadline) : null,
+                contributionRules: contributionRules ? JSON.parse(contributionRules) : undefined,
+                vaultId: finalVaultId,
+            };
+
+            if (!isShared && workspaceId) data.workspaceId = workspaceId;
+            if (isShared) data.tenantId = user.tenantId;
+
+            if (id) {
+                await tx.goal.update({ where: { id }, data });
+            } else {
+                await tx.goal.create({ data });
+            }
+        });
+
+        revalidatePath('/dashboard/goals');
+        return { success: true };
+    } catch(e: any) { 
+        return { error: e.message || "Erro ao salvar meta." }; 
+    }
 }

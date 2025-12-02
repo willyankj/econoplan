@@ -5,12 +5,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Target, Loader2, Plus, Pencil, Users, PieChart, RefreshCw, Link as LinkIcon, Calendar, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Target, Loader2, Plus, Pencil, Link as LinkIcon, Calendar, PiggyBank } from "lucide-react";
 import { upsertGoal } from '@/app/dashboard/actions';
 import { toast } from "sonner";
 import { BankLogo } from "@/components/ui/bank-logo";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 interface GoalModalProps {
   goal?: any;
@@ -23,74 +23,63 @@ export function GoalModal({ goal, isShared = false, workspaces = [], accounts = 
   const [open, setOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   
-  const [rules, setRules] = useState<Record<string, number>>({});
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  // Estado para controlar se vai usar cofrinho existente ou criar novo
+  const [vaultMode, setVaultMode] = useState<"existing" | "new">("new");
+  const [selectedVaultId, setSelectedVaultId] = useState<string>(goal?.vaultId || "");
 
   const isEditing = !!goal;
 
+  // Lista plana de todos os cofrinhos disponíveis
+  const allVaults = accounts.flatMap(acc => 
+    (acc.vaults || []).map((v: any) => ({ ...v, bankName: acc.bank, bankAccountName: acc.name }))
+  );
+
+  // Se já tem meta e ela tem cofrinho, abre no modo 'existing'
   useEffect(() => {
-      if (goal?.contributionRules) {
-          const savedRules = goal.contributionRules as Record<string, number>;
-          setRules(savedRules);
-          setSelectedIds(Object.keys(savedRules));
-      } else if (isShared && workspaces.length > 0 && !isEditing && open) {
-          const allIds = workspaces.map(w => w.id);
-          setSelectedIds(allIds);
-          distributeEvenly(allIds);
-      }
-  }, [goal, isShared, workspaces, open, isEditing]);
-
-  const distributeEvenly = (ids: string[]) => {
-      if (ids.length === 0) { setRules({}); return; }
-      const equalShare = Math.floor(100 / ids.length);
-      const remainder = 100 - (equalShare * ids.length);
-      const newRules: Record<string, number> = {};
-      ids.forEach((id, index) => { newRules[id] = index === 0 ? equalShare + remainder : equalShare; });
-      setRules(newRules);
-  };
-
-  const handleToggleParticipant = (wsId: string, checked: boolean) => {
-      let newSelected = [...selectedIds];
-      if (checked) newSelected.push(wsId); else newSelected = newSelected.filter(id => id !== wsId);
-      setSelectedIds(newSelected); distributeEvenly(newSelected); 
-  };
-
-  const handleRuleChange = (wsId: string, val: string) => {
-      const num = Math.min(100, Math.max(0, Number(val)));
-      setRules(prev => ({ ...prev, [wsId]: num }));
-  };
-
-  const totalPercentage = Object.entries(rules).filter(([key]) => selectedIds.includes(key)).reduce((acc, [, val]) => acc + val, 0);
-  const isTotalValid = totalPercentage === 100;
+    if (goal?.vaultId) {
+        setVaultMode("existing");
+        setSelectedVaultId(goal.vaultId);
+    } else if (allVaults.length > 0) {
+        // Se tem cofrinhos mas não tá vinculado, sugere existente
+        setVaultMode("existing");
+    }
+  }, [goal, allVaults.length]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (isShared && totalPercentage !== 100) return toast.error(`A soma das porcentagens deve ser 100%. Atualmente: ${totalPercentage}%`);
-    if (isShared && selectedIds.length === 0) return toast.error("Selecione pelo menos um participante.");
-
     setIsLoading(true);
     const formData = new FormData(event.currentTarget);
     
-    if (isShared) {
-        const finalRules: Record<string, number> = {};
-        selectedIds.forEach(id => { finalRules[id] = rules[id] || 0; });
-        formData.append('contributionRules', JSON.stringify(finalRules));
+    // Adiciona flags para o backend saber o que fazer
+    if (!isShared) {
+        if (vaultMode === "new") {
+            formData.append("createVault", "true");
+        } else {
+            formData.append("createVault", "false");
+            if(!selectedVaultId) {
+                toast.error("Selecione um cofrinho existente.");
+                setIsLoading(false);
+                return;
+            }
+            formData.append("vaultId", selectedVaultId);
+        }
     }
     
-    try {
-        if (isEditing) await upsertGoal(formData, goal.id);
-        else if (isShared) await upsertGoal(formData, undefined, true);
-        else await upsertGoal(formData);
-        toast.success(isEditing ? "Meta atualizada!" : "Meta criada!");
+    const res = await upsertGoal(formData, goal?.id, isShared);
+    
+    setIsLoading(false);
+    if (res?.error) {
+        toast.error(res.error);
+    } else {
+        toast.success(isEditing ? "Meta atualizada!" : "Meta criada com sucesso!");
         setOpen(false);
-    } catch (error) { toast.error("Erro ao salvar meta."); } 
-    finally { setIsLoading(false); }
+    }
   }
 
   const formattedDeadline = goal?.deadline ? new Date(goal.deadline).toISOString().split('T')[0] : '';
-  const themeColor = isShared ? "text-purple-500" : "text-amber-500";
   const themeBg = isShared ? "bg-purple-600 hover:bg-purple-500" : "bg-amber-500 hover:bg-amber-400";
   const themeLightBg = isShared ? "bg-purple-50 dark:bg-purple-950/20" : "bg-amber-50 dark:bg-amber-950/20";
+  const themeColor = isShared ? "text-purple-500" : "text-amber-500";
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -99,21 +88,21 @@ export function GoalModal({ goal, isShared = false, workspaces = [], accounts = 
              <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground"><Pencil className="w-3 h-3" /></Button>
         ) : (
              <Button className={`${themeBg} text-white shadow-sm`}>
-                <Plus className="w-4 h-4 mr-2" /> {isShared ? 'Nova Meta Conjunta' : 'Novo Objetivo'}
+                <Plus className="w-4 h-4 mr-2" /> {isShared ? 'Meta Compartilhada' : 'Novo Objetivo'}
              </Button>
         )}
       </DialogTrigger>
       
-      <DialogContent className="bg-card border-border text-card-foreground sm:max-w-[500px] max-h-[90vh] overflow-y-auto scrollbar-thin p-0 gap-0 rounded-xl overflow-hidden">
+      <DialogContent className="bg-card border-border text-card-foreground sm:max-w-[500px] p-0 gap-0 rounded-xl overflow-hidden max-h-[90vh] overflow-y-auto">
         
         <form onSubmit={handleSubmit} className="flex flex-col">
             
-            {/* HERO INPUT (VALOR DA META) */}
+            {/* HERO: VALOR ALVO */}
             <div className={`p-6 pb-8 transition-colors duration-300 ${themeLightBg}`}>
                 <DialogHeader className="mb-4">
                     <DialogTitle className="text-center text-muted-foreground font-medium text-sm uppercase tracking-wider flex items-center justify-center gap-2">
-                        {isShared ? <Users className="w-4 h-4" /> : <Target className="w-4 h-4" />}
-                        {isEditing ? "Editar Meta" : (isShared ? "Nova Meta Compartilhada" : "Novo Objetivo")}
+                        {isShared ? <Target className="w-4 h-4" /> : <Target className="w-4 h-4" />}
+                        {isEditing ? "Editar Meta" : "Novo Objetivo"}
                     </DialogTitle>
                 </DialogHeader>
 
@@ -130,84 +119,89 @@ export function GoalModal({ goal, isShared = false, workspaces = [], accounts = 
                         required
                     />
                 </div>
-                <p className="text-center text-xs text-muted-foreground mt-2">Quanto você quer juntar?</p>
+                <p className="text-center text-xs text-muted-foreground mt-2">Qual o valor total que você quer juntar?</p>
             </div>
 
             <div className="p-6 space-y-5">
                 <div className="grid gap-1.5">
                     <Label className="text-xs text-muted-foreground ml-1">Nome do Objetivo</Label>
-                    <Input name="name" defaultValue={goal?.name} placeholder="Ex: Viagem para Europa, Carro Novo..." className="bg-muted/50 border-transparent focus:border-primary transition-all" required />
+                    <Input name="name" defaultValue={goal?.name} placeholder="Ex: Viagem, Carro Novo, Reserva..." className="bg-muted/50 border-transparent focus:border-primary transition-all" required />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                    {!isEditing && !isShared && (
-                        <div className="grid gap-1.5">
-                            <Label className="text-xs text-muted-foreground ml-1">Saldo Inicial (Já tenho)</Label>
-                            <Input name="currentAmount" type="number" step="0.01" placeholder="0.00" className="bg-muted/50 border-transparent" />
-                        </div>
-                    )}
-                    <div className={`grid gap-1.5 ${isEditing || isShared ? 'col-span-2' : ''}`}>
-                        <Label className="text-xs text-muted-foreground ml-1 flex items-center gap-1"><Calendar className="w-3 h-3"/> Prazo Final</Label>
-                        <Input name="deadline" type="date" defaultValue={formattedDeadline} className="bg-muted/50 border-transparent" />
-                    </div>
+                <div className="grid gap-1.5">
+                    <Label className="text-xs text-muted-foreground ml-1 flex items-center gap-1"><Calendar className="w-3 h-3"/> Prazo Final (Opcional)</Label>
+                    <Input name="deadline" type="date" defaultValue={formattedDeadline} className="bg-muted/50 border-transparent" />
                 </div>
 
-                {/* VINCULAR CONTA */}
+                {/* SEÇÃO DE VÍNCULO COM COFRINHO (Apenas para metas pessoais) */}
                 {!isShared && (
-                    <div className="grid gap-1.5 bg-muted/30 p-3 rounded-lg border border-border/50">
-                        <Label className="text-xs text-blue-500 font-medium flex items-center gap-1 mb-1">
-                            <LinkIcon className="w-3 h-3" /> Automação (Vincular Conta)
-                        </Label>
-                        <Select name="linkedAccountId" defaultValue={goal?.linkedAccountId || "none"}>
-                            <SelectTrigger className="bg-background border-border h-9">
-                                <SelectValue placeholder="Selecione uma conta..." />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="none">Não vincular (Manual)</SelectItem>
-                                {accounts.map(acc => (
-                                    <SelectItem key={acc.id} value={acc.id}>
-                                        <div className="flex items-center gap-2">
-                                            <BankLogo bankName={acc.bank} className="w-4 h-4" />
-                                            {acc.name}
-                                        </div>
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                        <p className="text-[10px] text-muted-foreground mt-1">Toda movimentação nesta conta atualizará a meta automaticamente.</p>
-                    </div>
-                )}
+                    <div className="border border-emerald-100 dark:border-emerald-900/50 rounded-xl p-4 bg-emerald-50/50 dark:bg-emerald-950/10">
+                         <div className="flex items-center gap-2 mb-3">
+                            <PiggyBank className="w-4 h-4 text-emerald-600" />
+                            <Label className="font-semibold text-emerald-700 dark:text-emerald-400">Onde guardar o dinheiro?</Label>
+                         </div>
+                         
+                         <Tabs value={vaultMode} onValueChange={(v) => setVaultMode(v as any)} className="w-full">
+                            <TabsList className="w-full grid grid-cols-2 mb-3 h-8">
+                                <TabsTrigger value="new" className="text-xs">Criar Novo Cofrinho</TabsTrigger>
+                                <TabsTrigger value="existing" className="text-xs" disabled={allVaults.length === 0}>Usar Existente</TabsTrigger>
+                            </TabsList>
 
-                {/* PARTICIPANTES (COMPARTILHADA) */}
-                {isShared && workspaces.length > 0 && (
-                    <div className="border-t border-border pt-4">
-                        <div className="flex items-center justify-between mb-3">
-                            <Label className="text-purple-500 font-bold text-xs flex items-center gap-1"><PieChart className="w-3 h-3" /> Divisão</Label>
-                            <div className="flex items-center gap-2">
-                                <div className={`text-xs font-bold px-2 py-0.5 rounded-full flex items-center gap-1 ${isTotalValid ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>
-                                    {isTotalValid ? <CheckCircle2 className="w-3 h-3" /> : <AlertCircle className="w-3 h-3" />}
-                                    Total: {totalPercentage}%
+                            <TabsContent value="new" className="space-y-3 animate-in fade-in-50">
+                                <div className="grid gap-1.5">
+                                    <Label className="text-xs text-muted-foreground">Nome do Cofrinho</Label>
+                                    <Input name="newVaultName" placeholder="Ex: Cofre da Viagem" defaultValue={goal?.name ? `Cofre ${goal.name}` : ''} className="h-9 bg-background" />
                                 </div>
-                                <button type="button" onClick={() => distributeEvenly(selectedIds)} className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 bg-muted/50 px-2 py-1 rounded"><RefreshCw className="w-3 h-3" /> Distribuir Igual</button>
-                            </div>
-                        </div>
-                        <div className="space-y-2 bg-muted/30 p-2 rounded-lg border border-border max-h-[150px] overflow-y-auto">
-                            {workspaces.map(ws => {
-                                const isSelected = selectedIds.includes(ws.id);
-                                return (
-                                    <div key={ws.id} className={`flex items-center gap-2 p-2 rounded border transition-all ${isSelected ? 'bg-card border-border' : 'border-transparent opacity-50'}`}>
-                                        <Checkbox checked={isSelected} onCheckedChange={(c) => handleToggleParticipant(ws.id, c as boolean)} className="data-[state=checked]:bg-purple-600 data-[state=checked]:border-purple-600" />
-                                        <span className="text-xs font-medium flex-1 truncate">{ws.name}</span>
-                                        {isSelected && (
-                                            <div className="flex items-center gap-1 w-[120px]">
-                                                <input type="range" min="0" max="100" step="1" value={rules[ws.id] || 0} onChange={(e) => handleRuleChange(ws.id, e.target.value)} className="w-full h-1.5 bg-muted rounded-lg appearance-none cursor-pointer accent-purple-500" />
-                                                <span className="text-xs font-mono w-8 text-right">{rules[ws.id] || 0}%</span>
-                                            </div>
-                                        )}
-                                    </div>
-                                );
-                            })}
-                        </div>
+                                <div className="grid gap-1.5">
+                                    <Label className="text-xs text-muted-foreground">Vincular a qual conta bancária?</Label>
+                                    <Select name="newVaultAccountId">
+                                        <SelectTrigger className="h-9 bg-background">
+                                            <SelectValue placeholder="Selecione o banco..." />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {accounts.map(acc => (
+                                                <SelectItem key={acc.id} value={acc.id}>
+                                                    <div className="flex items-center gap-2">
+                                                        <BankLogo bankName={acc.bank} className="w-3 h-3" />
+                                                        {acc.name}
+                                                    </div>
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <p className="text-[10px] text-muted-foreground mt-1">
+                                    Criaremos um "envelope" separado dentro desta conta para você organizar esse dinheiro.
+                                </p>
+                            </TabsContent>
+
+                            <TabsContent value="existing" className="space-y-3 animate-in fade-in-50">
+                                <div className="grid gap-1.5">
+                                    <Label className="text-xs text-muted-foreground">Selecione o cofrinho</Label>
+                                    <Select value={selectedVaultId} onValueChange={setSelectedVaultId}>
+                                        <SelectTrigger className="h-9 bg-background">
+                                            <SelectValue placeholder="Selecione..." />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {allVaults.map(v => (
+                                                <SelectItem key={v.id} value={v.id}>
+                                                    <div className="flex items-center gap-2">
+                                                        <BankLogo bankName={v.bankName} className="w-3 h-3" />
+                                                        <span>{v.name} (R$ {Number(v.balance).toFixed(2)})</span>
+                                                    </div>
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                {selectedVaultId && (
+                                    <p className="text-[10px] text-emerald-600 flex items-center gap-1">
+                                        <LinkIcon className="w-3 h-3" />
+                                        A meta herdará o saldo atual de R$ {allVaults.find(v => v.id === selectedVaultId)?.balance?.toFixed(2)} deste cofrinho.
+                                    </p>
+                                )}
+                            </TabsContent>
+                         </Tabs>
                     </div>
                 )}
 

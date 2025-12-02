@@ -5,144 +5,109 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { PiggyBank, Loader2, ArrowUpCircle, ArrowDownCircle } from "lucide-react";
-import { addMoneyToGoal, withdrawMoneyFromGoal } from '@/app/dashboard/actions';
-import { BankLogo } from "@/components/ui/bank-logo";
+import { Plus, ArrowDown, Loader2, PiggyBank, ArrowUp } from "lucide-react";
+import { transferVault } from '@/app/dashboard/actions/finance';
 import { toast } from "sonner";
-import { formatCurrency } from "@/lib/utils";
+import { BankLogo } from "@/components/ui/bank-logo";
 
-interface DepositModalProps {
-  goal: { 
-    id: string; 
-    name: string; 
-    targetAmount: number; 
-    currentAmount: number;
-  };
-  accounts: (any & { workspaceName?: string })[]; 
-  type: 'DEPOSIT' | 'WITHDRAW';
-  disabled?: boolean;
+interface DepositGoalModalProps {
+    goal: any;
+    accounts?: any[]; // Não usado diretamente mais, pois o vínculo é fixo, mas mantido pra compatibilidade
+    type: "DEPOSIT" | "WITHDRAW";
 }
 
-export function DepositGoalModal({ goal, accounts, type, disabled = false }: DepositModalProps) {
-  const [open, setOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [amount, setAmount] = useState('');
-  const [accountId, setAccountId] = useState('');
+export function DepositGoalModal({ goal, type }: DepositGoalModalProps) {
+    const [open, setOpen] = useState(false);
+    const [isLoading, setIsLoading] = useState(false);
+    const [mode, setMode] = useState<'DEPOSIT' | 'WITHDRAW'>('DEPOSIT');
 
-  const isDeposit = type === 'DEPOSIT';
-  
-  // Temas Dinâmicos
-  const themeColor = isDeposit ? "text-emerald-500" : "text-amber-500";
-  const themeBg = isDeposit ? "bg-emerald-600" : "bg-amber-500";
-  const themeLightBg = isDeposit ? "bg-emerald-50 dark:bg-emerald-950/20" : "bg-amber-50 dark:bg-amber-950/20";
+    // Se a meta não tem cofrinho vinculado, não permite operação (teoricamente não acontece mais com a regra nova)
+    if (!goal.vaultId) return null;
 
-  async function handleConfirm(e: React.FormEvent) {
-    e.preventDefault();
-    if (!amount || !accountId) return;
-    setIsLoading(true);
-    
-    const value = parseFloat(amount);
-    let result;
-
-    if (isDeposit) {
-        result = await addMoneyToGoal(goal.id, value, accountId);
-    } else {
-        result = await withdrawMoneyFromGoal(goal.id, value, accountId);
+    async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+        event.preventDefault();
+        setIsLoading(true);
+        const formData = new FormData(event.currentTarget);
+        const amount = Number(formData.get('amount'));
+        
+        // Usa a action centralizada de cofrinho
+        const res = await transferVault(goal.vaultId, amount, mode);
+        
+        setIsLoading(false);
+        if (res?.error) {
+            toast.error(res.error);
+        } else {
+            toast.success(mode === 'DEPOSIT' ? "Aporte realizado!" : "Resgate realizado!");
+            setOpen(false);
+        }
     }
-    
-    setIsLoading(false);
 
-    if (result?.error) {
-        toast.error("Erro na operação", { description: result.error });
-    } else {
-        toast.success(isDeposit ? "Valor guardado com sucesso!" : "Resgate realizado com sucesso!");
-        setOpen(false);
-        setAmount('');
-        setAccountId('');
-    }
-  }
+    const isDeposit = mode === 'DEPOSIT';
+    const colorClass = isDeposit ? "text-emerald-600" : "text-amber-600";
+    const bgClass = isDeposit ? "bg-emerald-600 hover:bg-emerald-700" : "bg-amber-600 hover:bg-amber-700";
 
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button 
-            variant="outline" 
-            size="sm" 
-            className={`w-full ${isDeposit ? "text-emerald-600 border-emerald-200 hover:bg-emerald-50 dark:border-emerald-900/50 dark:text-emerald-400" : "text-amber-600 border-amber-200 hover:bg-amber-50 dark:border-amber-900/50 dark:text-amber-400"}`}
-            disabled={disabled}
-        >
-            {isDeposit ? <ArrowUpCircle className="w-4 h-4 mr-2" /> : <ArrowDownCircle className="w-4 h-4 mr-2" />}
-            {isDeposit ? 'Guardar' : 'Resgatar'}
-        </Button>
-      </DialogTrigger>
-      
-      <DialogContent className="bg-card border-border text-card-foreground sm:max-w-[450px] p-0 gap-0 rounded-xl overflow-hidden">
-        <form onSubmit={handleConfirm} className="flex flex-col">
-            
-            {/* HEADER COM VALOR */}
-            <div className={`p-6 pb-8 transition-colors duration-300 ${themeLightBg}`}>
-                <DialogHeader className="mb-4">
-                    <DialogTitle className="text-center text-muted-foreground font-medium text-sm uppercase tracking-wider flex items-center justify-center gap-2">
-                        {isDeposit ? "Guardar Dinheiro" : "Resgatar Valor"} - {goal.name}
+    return (
+        <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+                <Button className="flex-1 bg-primary text-primary-foreground shadow-sm h-8 text-xs font-semibold">
+                    <Plus className="w-3 h-3 mr-1" /> Aportar / Resgatar
+                </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-[400px]">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                        <PiggyBank className="w-5 h-5 text-muted-foreground" />
+                        {goal.name}
                     </DialogTitle>
                 </DialogHeader>
 
-                <div className="relative flex justify-center items-center">
-                    <span className={`text-2xl font-medium mr-2 opacity-50 ${themeColor}`}>R$</span>
-                    <Input 
-                        type="number" 
-                        step="0.01" 
-                        placeholder="0,00" 
-                        value={amount}
-                        onChange={(e) => setAmount(e.target.value)}
-                        className={`text-5xl font-bold text-center border-none shadow-none bg-transparent focus-visible:ring-0 h-16 w-full placeholder:text-muted-foreground/30 ${themeColor} [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
-                        autoFocus
-                        required
-                        min={!isDeposit ? 0.01 : 0}
-                        max={!isDeposit ? goal.currentAmount : undefined}
-                    />
-                </div>
-                <p className="text-center text-xs text-muted-foreground mt-2">
-                    {isDeposit ? "Quanto você quer investir hoje?" : `Disponível para resgate: ${formatCurrency(goal.currentAmount)}`}
-                </p>
-            </div>
-
-            <div className="p-6 space-y-5">
-                <div className="grid gap-1.5">
-                    <Label className="text-xs text-muted-foreground ml-1">
-                        {isDeposit ? 'Debitar de qual conta?' : 'Enviar para qual conta?'}
-                    </Label>
-                    <Select value={accountId} onValueChange={setAccountId} required>
-                        <SelectTrigger className="bg-muted/50 border-transparent h-11 w-full">
-                            <SelectValue placeholder="Selecione a conta..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {accounts.length === 0 ? (
-                                <SelectItem value="none" disabled>Nenhuma conta disponível</SelectItem>
-                            ) : (
-                                accounts.map((acc) => (
-                                <SelectItem key={acc.id} value={acc.id}>
-                                    <div className="flex items-center gap-2">
-                                        <BankLogo bankName={acc.bank} className="w-4 h-4" />
-                                        {acc.name}
-                                        <span className="text-xs text-muted-foreground ml-auto">
-                                            {formatCurrency(acc.balance)}
-                                        </span>
-                                    </div>
-                                </SelectItem>
-                                ))
-                            )}
-                        </SelectContent>
-                    </Select>
+                <div className="flex gap-2 p-1 bg-muted rounded-lg mb-4 mt-2">
+                    <button 
+                        onClick={() => setMode('DEPOSIT')}
+                        className={`flex-1 flex items-center justify-center gap-2 py-2 text-sm font-medium rounded-md transition-all ${mode === 'DEPOSIT' ? 'bg-emerald-500 text-white shadow' : 'text-muted-foreground hover:bg-background'}`}
+                    >
+                        <ArrowUp className="w-4 h-4" /> Aportar
+                    </button>
+                    <button 
+                        onClick={() => setMode('WITHDRAW')}
+                        className={`flex-1 flex items-center justify-center gap-2 py-2 text-sm font-medium rounded-md transition-all ${mode === 'WITHDRAW' ? 'bg-amber-500 text-white shadow' : 'text-muted-foreground hover:bg-background'}`}
+                    >
+                        <ArrowDown className="w-4 h-4" /> Resgatar
+                    </button>
                 </div>
 
-                <Button type="submit" disabled={isLoading || !amount || !accountId} className={`w-full text-white font-bold h-12 shadow-md transition-all hover:scale-[1.02] ${themeBg} hover:opacity-90`}>
-                    {isLoading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : 'Confirmar'}
-                </Button>
-            </div>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div className="text-center py-4 bg-muted/30 rounded-lg border border-border/50">
+                        <p className="text-xs text-muted-foreground mb-1">
+                            {isDeposit 
+                                ? "O dinheiro sairá da conta e entrará na meta (cofrinho)." 
+                                : "O dinheiro sairá da meta e voltará para a conta."
+                            }
+                        </p>
+                    </div>
+
+                    <div className="grid gap-2">
+                        <Label>Valor (R$)</Label>
+                        <div className="relative">
+                            <span className={`absolute left-3 top-1/2 -translate-y-1/2 font-bold ${colorClass}`}>R$</span>
+                            <Input 
+                                name="amount" 
+                                type="number" 
+                                step="0.01" 
+                                min="0.01" 
+                                required 
+                                placeholder="0.00" 
+                                className="pl-9 text-lg font-bold"
+                                autoFocus 
+                            />
+                        </div>
+                    </div>
+
+                    <Button type="submit" disabled={isLoading} className={`w-full font-bold ${bgClass}`}>
+                        {isLoading ? <Loader2 className="animate-spin w-4 h-4" /> : "Confirmar Transação"}
+                    </Button>
+                </form>
+            </DialogContent>
+        </Dialog>
+    );
 }
