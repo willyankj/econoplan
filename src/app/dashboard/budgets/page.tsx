@@ -74,8 +74,7 @@ export default async function BudgetsPage({
         </div>
         
         <div className="flex items-center gap-4">
-            {/* 4. COMPONENTE SUBSTITUÍDO */}
-            <DateMonthSelector /> 
+            <DatePickerWithRange />
             <BudgetModal categories={categories} />
         </div>
       </div>

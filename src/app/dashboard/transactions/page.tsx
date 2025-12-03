@@ -20,13 +20,17 @@ import { formatCurrency } from "@/lib/utils";
 
 import { getRecurringTransactions } from "@/app/dashboard/actions";
 import { RecurringModal } from "@/components/dashboard/transactions/recurring-modal";
+import { PaginationControls } from "@/components/ui/pagination-controls";
 
 export const dynamic = 'force-dynamic';
 
 export default async function TransactionsPage({
   searchParams
 }: {
-  searchParams: Promise<{ type?: string, q?: string, cardId?: string, accountId?: string, from?: string, to?: string, categoryId?: string }>
+  searchParams: Promise<{
+      type?: string, q?: string, cardId?: string, accountId?: string,
+      from?: string, to?: string, categoryId?: string, page?: string
+  }>
 }) {
   const { workspaceId, user } = await getUserWorkspace();
   if (!workspaceId || !user) redirect("/login");
@@ -106,18 +110,29 @@ export default async function TransactionsPage({
     };
   }
 
-  const transactions = await prisma.transaction.findMany({
-    where: whereCondition,
-    orderBy: { date: 'desc' },
-    take: 100,
-    include: { 
-        category: true, 
-        bankAccount: true, 
-        recipientAccount: true, // Incluído para exibir destino
-        creditCard: true,
-        vault: { include: { goal: true } }
-    }
-  });
+  // PAGINAÇÃO
+  const page = Number(params.page) || 1;
+  const itemsPerPage = 20;
+  const skip = (page - 1) * itemsPerPage;
+
+  const [totalItems, transactions] = await prisma.$transaction([
+      prisma.transaction.count({ where: whereCondition }),
+      prisma.transaction.findMany({
+        where: whereCondition,
+        orderBy: { date: 'desc' },
+        skip: skip,
+        take: itemsPerPage,
+        include: {
+            category: true,
+            bankAccount: true,
+            recipientAccount: true,
+            creditCard: true,
+            vault: { include: { goal: true } }
+        }
+      })
+  ]);
+
+  const totalPages = Math.ceil(totalItems / itemsPerPage);
 
   const transactionsForExport = transactions.map(t => ({
     description: t.description,
@@ -135,7 +150,7 @@ export default async function TransactionsPage({
             {params.cardId ? 'Extrato do Cartão' : 'Extrato Geral'}
           </h2>
           <p className="text-muted-foreground">
-            {transactions.length} lançamento(s) encontrado(s)
+            {totalItems} lançamento(s) encontrado(s)
           </p>
         </div>
           
@@ -300,6 +315,16 @@ export default async function TransactionsPage({
             </Table>
           </div>
         </CardContent>
+        {totalItems > 0 && (
+            <div className="border-t border-border bg-muted/20">
+                <PaginationControls
+                    currentPage={page}
+                    totalPages={totalPages}
+                    totalItems={totalItems}
+                    itemsPerPage={itemsPerPage}
+                />
+            </div>
+        )}
       </Card>
     </div>
   );
