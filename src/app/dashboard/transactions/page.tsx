@@ -113,6 +113,7 @@ export default async function TransactionsPage({
     include: { 
         category: true, 
         bankAccount: true, 
+        recipientAccount: true, // Incluído para exibir destino
         creditCard: true,
         vault: { include: { goal: true } }
     }
@@ -238,19 +239,43 @@ export default async function TransactionsPage({
                     </TableCell>
 
                     <TableCell>
-                        <Badge variant="outline" className="bg-muted text-muted-foreground border-border font-normal gap-1 pr-3">
-                            {(() => {
-                                if (!t.category) return <span>Geral</span>;
-                                // @ts-ignore
-                                const CatIcon = Icons[t.category.icon] || Icons.Tag;
-                                return (
-                                    <>
-                                        <CatIcon className="w-3 h-3" style={{ color: t.category.color || 'inherit' }} />
-                                        <span style={{ color: t.category.color || 'inherit' }}>{t.category.name}</span>
-                                    </>
-                                );
-                            })()}
-                        </Badge>
+                        {t.type === 'TRANSFER' && t.recipientAccount ? (
+                            <div className="flex flex-col gap-1">
+                                <Badge variant="outline" className="bg-blue-500/5 text-blue-600 border-blue-200 font-normal w-fit gap-1">
+                                    <Icons.ArrowRightLeft className="w-3 h-3" />
+                                    Transferência
+                                </Badge>
+                                <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+                                    {t.bankAccount?.name} <Icons.ArrowRight className="w-3 h-3" /> {t.recipientAccount.name}
+                                </span>
+                            </div>
+                        ) : (t.type === 'VAULT_DEPOSIT' || t.type === 'VAULT_WITHDRAW') ? (
+                             <div className="flex flex-col gap-1">
+                                <Badge variant="outline" className="bg-amber-500/5 text-amber-600 border-amber-200 font-normal w-fit gap-1">
+                                    <Icons.PiggyBank className="w-3 h-3" />
+                                    {t.type === 'VAULT_DEPOSIT' ? 'Aporte' : 'Resgate'}
+                                </Badge>
+                                {t.vault && (
+                                    <span className="text-[10px] text-muted-foreground">
+                                        {t.vault.name}
+                                    </span>
+                                )}
+                            </div>
+                        ) : (
+                            <Badge variant="outline" className="bg-muted text-muted-foreground border-border font-normal gap-1 pr-3">
+                                {(() => {
+                                    if (!t.category) return <span>Geral</span>;
+                                    // @ts-ignore
+                                    const CatIcon = Icons[t.category.icon] || Icons.Tag;
+                                    return (
+                                        <>
+                                            <CatIcon className="w-3 h-3" style={{ color: t.category.color || 'inherit' }} />
+                                            <span style={{ color: t.category.color || 'inherit' }}>{t.category.name}</span>
+                                        </>
+                                    );
+                                })()}
+                            </Badge>
+                        )}
                     </TableCell>
                     
                     <TableCell className="text-muted-foreground">

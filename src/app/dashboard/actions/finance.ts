@@ -367,14 +367,36 @@ export async function upsertTransaction(formData: FormData, id?: string) {
               const oldT = await tx.transaction.findUnique({ where: { id } });
               if (!oldT) throw new Error("Transação original não encontrada");
 
+              // TRAVA DE SEGURANÇA: Bloquear edição de valor/tipo em Transferências e Aportes
+              // Motivo: A lógica de reversão de saldo para múltiplas contas (ou conta+cofrinho) é complexa e propensa a erros
+              // se feita via edição simples. É mais seguro forçar a recriação.
+              const isComplexTransaction =
+                  oldT.type === 'TRANSFER' ||
+                  oldT.type === 'VAULT_DEPOSIT' ||
+                  oldT.type === 'VAULT_WITHDRAW' ||
+                  oldT.recipientAccountId ||
+                  oldT.vaultId;
+
+              if (isComplexTransaction) {
+                  // Se tentar mudar o valor ou o tipo...
+                  if (amount !== Number(oldT.amount) || type !== oldT.type) {
+                       throw new Error("Para alterar o valor ou tipo de Transferências ou Investimentos, por favor exclua a transação e crie novamente para garantir a integridade dos saldos.");
+                  }
+                  // Permitir apenas alteração de data, descrição e categoria (se não afetar lógica financeira)
+              }
+
               await tx.transaction.update({ 
                   where: { id }, 
-                  data: { description, amount, date: baseDate, categoryId: catId } 
+                  data: { description, date: baseDate, categoryId: catId }
               });
 
-              if (oldT.isPaid && oldT.bankAccountId && oldT.type !== 'TRANSFER') {
+              // Atualização de saldo APENAS para Income/Expense simples
+              if (!isComplexTransaction && oldT.isPaid && oldT.bankAccountId) {
                   const diff = amount - Number(oldT.amount);
                   if (diff !== 0) {
+                      // Atualiza a transação com o novo valor também (pois não foi bloqueado acima)
+                      await tx.transaction.update({ where: { id }, data: { amount } });
+
                       if (oldT.type === 'INCOME') {
                           await tx.bankAccount.update({ where: { id: oldT.bankAccountId }, data: { balance: { increment: diff } } });
                       } else if (oldT.type === 'EXPENSE') {
@@ -384,7 +406,7 @@ export async function upsertTransaction(formData: FormData, id?: string) {
               }
           });
           return { success: true };
-      } catch (e) { return { error: "Erro ao atualizar transação." }; }
+      } catch (e: any) { return { error: e.message || "Erro ao atualizar transação." }; }
   }
 
   const isInstallment = recurrence === 'INSTALLMENT' && (installments || 0) > 1;
