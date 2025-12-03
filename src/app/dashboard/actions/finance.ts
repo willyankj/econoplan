@@ -739,147 +739,6 @@ export async function getUpcomingBills() {
 // --- MÓDULO DE COFRINHOS E METAS (ATUALIZADO) ---
 // --------------------------------------------------------
 
-const VaultSchema = z.object({
-  name: z.string().min(1, "Nome do cofrinho é obrigatório"),
-  bankAccountId: z.string().uuid("Conta bancária inválida"),
-  targetAmount: z.coerce.number().optional(),
-  initialBalance: z.coerce.number().optional(),
-  goalId: z.string().optional(),
-});
-
-export async function upsertVault(formData: FormData, id?: string) {
-  const { user, error } = await validateUser();
-  if (error || !user) return { error };
-
-  const parsed = VaultSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return { error: "Dados inválidos" };
-  const { name, bankAccountId, targetAmount, goalId, initialBalance } = parsed.data;
-
-  try {
-    await prisma.$transaction(async (tx) => {
-        if (id) {
-            // SEGURANÇA
-            const existing = await tx.vault.findUnique({ where: { id }, include: { bankAccount: { include: { workspace: true } } } });
-            if (!existing || existing.bankAccount.workspace.tenantId !== user.tenantId) throw new Error("Cofrinho não encontrado ou sem permissão.");
-
-            await tx.vault.update({ where: { id }, data: { name, targetAmount } });
-        } else {
-            // CORREÇÃO: Usando initialBalance
-            const vault = await tx.vault.create({ 
-                data: { name, bankAccountId, targetAmount, goalId, balance: initialBalance || 0 } 
-            });
-            
-            if (goalId) await recalculateGoalBalance(goalId, tx);
-            
-            await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'CREATE', entity: 'Vault', entityId: vault.id, details: `Criou cofrinho ${name}` });
-        }
-    });
-  } catch (e: any) { return { error: e.message || "Erro ao salvar cofrinho." }; }
-
-  revalidatePath('/dashboard');
-  revalidatePath(`/dashboard/accounts`);
-  return { success: true };
-}
-
-export async function deleteVault(id: string) {
-    const { user, error } = await validateUser();
-    if (error || !user) return { error };
-
-    // SEGURANÇA
-    const vault = await prisma.vault.findUnique({
-        where: { id },
-        include: { bankAccount: { include: { workspace: true } } }
-    });
-    if (!vault) return { error: "Cofrinho não encontrado" };
-    if (vault.bankAccount.workspace.tenantId !== user.tenantId) return { error: "Sem permissão." };
-
-    if (Number(vault.balance) > 0) return { error: "O cofrinho precisa estar vazio para ser excluído. Resgate o valor primeiro." };
-
-    try {
-        await prisma.$transaction(async (tx) => {
-            await tx.vault.delete({ where: { id } });
-            if (vault.goalId) await recalculateGoalBalance(vault.goalId, tx);
-        });
-        await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'DELETE', entity: 'Vault', details: `Excluiu cofrinho ${vault.name}` });
-    } catch (e) { return { error: "Erro ao excluir." }; }
-
-    revalidatePath('/dashboard');
-    return { success: true };
-}
-
-export async function transferVault(vaultId: string, amount: number, type: 'DEPOSIT' | 'WITHDRAW', accountId: string) {
-  const { user, error } = await validateUser();
-  if (error || !user) return { error };
-
-  if (amount <= 0) return { error: "Valor deve ser maior que zero." };
-  if (!accountId) return { error: "Selecione a conta." };
-
-  const vault = await prisma.vault.findUnique({ where: { id: vaultId } });
-  if (!vault) return { error: "Cofrinho não encontrado" };
-
-  try {
-    await prisma.$transaction(async (tx) => {
-      const userAccount = await tx.bankAccount.findUnique({ where: { id: accountId } });
-      if (!userAccount) throw new Error("Conta bancária não encontrada.");
-      
-      const workspaceId = await getActiveWorkspaceId(user);
-      if (userAccount.workspaceId !== workspaceId) throw new Error("Use uma conta do seu workspace atual.");
-
-      const isDeposit = type === 'DEPOSIT';
-      
-      if (isDeposit && Number(userAccount.balance) < amount) throw new Error("Saldo insuficiente na conta.");
-      if (!isDeposit && Number(vault.balance) < amount) throw new Error("Saldo insuficiente no cofrinho.");
-
-      const accountOp = isDeposit ? 'decrement' : 'increment';
-      await tx.bankAccount.update({
-          where: { id: accountId },
-          data: { balance: { [accountOp]: amount } }
-      });
-
-      const vaultOp = isDeposit ? 'increment' : 'decrement';
-      const updatedVault = await tx.vault.update({
-          where: { id: vaultId },
-          data: { balance: { [vaultOp]: amount } }
-      });
-
-      if (updatedVault.goalId) {
-          await recalculateGoalBalance(updatedVault.goalId, tx);
-      }
-
-      // CORREÇÃO: Usar o tipo real para categoria também
-      const txType = isDeposit ? 'VAULT_DEPOSIT' : 'VAULT_WITHDRAW';
-      const catType = txType;
-
-      const category = await tx.category.upsert({
-          where: { workspaceId_name_type: { workspaceId: userAccount.workspaceId, name: "Metas", type: catType } },
-          update: {},
-          create: { name: "Metas", type: catType, workspaceId: userAccount.workspaceId, icon: "PiggyBank", color: "#f59e0b" }
-      });
-
-      await tx.transaction.create({
-        data: {
-          description: isDeposit ? `Aporte: ${vault.name}` : `Resgate: ${vault.name}`,
-          amount,
-          type: txType,
-          date: new Date(),
-          workspaceId: userAccount.workspaceId,
-          bankAccountId: userAccount.id,
-          vaultId: vault.id,
-          isPaid: true,
-          categoryId: category.id
-        }
-      });
-    });
-
-    revalidatePath('/dashboard');
-    return { success: true };
-  } catch (e: any) { return { error: e.message || "Erro na movimentação." }; }
-}
-
-// --------------------------------------------------------
-// --- ATUALIZAÇÃO NO SCHEMA E NA ACTION DE METAS ---
-// --------------------------------------------------------
-
 const GoalSchema = z.object({
     name: z.string().min(1),
     targetAmount: z.coerce.number().positive(),
@@ -951,15 +810,30 @@ export async function upsertGoal(formData: FormData, id?: string, isShared = fal
                     include: { workspace: true }
                 });
 
-                // Se a meta é compartilhada, tenantId deve bater. Se é pessoal, workspace deve bater com acesso.
                 if (!existingGoal) throw new Error("Meta não encontrada.");
 
-                const isOwner = existingGoal.tenantId === user.tenantId ||
-                               (existingGoal.workspace && existingGoal.workspace.tenantId === user.tenantId);
+                // Verifica permissões
+                // 1. Acesso Básico (Ver/Participar): Deve ser do mesmo Tenant
+                const hasAccess = existingGoal.tenantId === user.tenantId ||
+                                 (existingGoal.workspace && existingGoal.workspace.tenantId === user.tenantId);
 
-                if (!isOwner) throw new Error("Sem permissão para editar esta meta.");
+                if (!hasAccess) throw new Error("Sem permissão de acesso.");
 
-                await tx.goal.update({ where: { id }, data });
+                // 2. Permissão de Edição (Alterar Nome/Valor):
+                //    - Se for meta pessoal: Deve ser dono do workspace.
+                //    - Se for meta compartilhada: Deve ser Admin do Tenant ou dono do workspace criador (se houver).
+                //    - Simplificação: Se o usuário tiver role ADMIN/OWNER no Tenant OU for membro do workspace criador com role ADMIN.
+
+                // Vamos simplificar: Se o workspaceId do usuário atual bater com o da meta, ou se ele for ADMIN do tenant.
+                const isCreatorWorkspace = existingGoal.workspaceId === workspaceId;
+                const isTenantAdmin = user.role === 'OWNER' || user.role === 'ADMIN';
+                const canEditDetails = isCreatorWorkspace || isTenantAdmin;
+
+                // Se tiver permissão, atualiza os dados da meta.
+                // Se não tiver (é apenas um participante vinculando cofrinho), PULA a atualização da meta para não sobrescrever dados.
+                if (canEditDetails) {
+                    await tx.goal.update({ where: { id }, data });
+                }
             }
 
             // Cenário A: Criar Novo Cofrinho
