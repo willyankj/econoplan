@@ -311,6 +311,17 @@ export default async function TransactionsPage({
 
                     </TableRow>
                 )})}
+                {totalItems === 0 && (
+                    <TableRow>
+                        <TableCell colSpan={7} className="h-48 text-center text-muted-foreground">
+                            <div className="flex flex-col items-center justify-center gap-2">
+                                <Icons.Ghost className="w-10 h-10 opacity-20" />
+                                <p>Nenhum lançamento encontrado.</p>
+                                <p className="text-xs opacity-50">Tente ajustar os filtros ou adicione uma nova transação.</p>
+                            </div>
+                        </TableCell>
+                    </TableRow>
+                )}
                 </TableBody>
             </Table>
           </div>

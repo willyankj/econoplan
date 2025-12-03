@@ -24,8 +24,8 @@ export function PaginationControls({ currentPage, totalPages, totalItems, itemsP
   if (totalPages <= 1) return null;
 
   return (
-    <div className="flex items-center justify-between px-2 py-4 w-full">
-      <div className="text-xs text-muted-foreground">
+    <div className="flex flex-col sm:flex-row items-center justify-between px-4 py-4 w-full gap-4 sm:gap-0">
+      <div className="text-xs text-muted-foreground text-center sm:text-left">
         Mostrando <strong>{Math.min((currentPage - 1) * itemsPerPage + 1, totalItems)}</strong> a <strong>{Math.min(currentPage * itemsPerPage, totalItems)}</strong> de <strong>{totalItems}</strong> resultados
       </div>
       <div className="flex items-center space-x-2">
