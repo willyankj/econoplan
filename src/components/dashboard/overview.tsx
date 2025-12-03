@@ -44,58 +44,60 @@ export function DashboardOverview({ data }: { data: DashboardData }) {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
+       {/* HEADER UNIFICADO */}
        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-foreground">Visão Geral</h2>
-          <p className="text-muted-foreground">Dados em tempo real do <span className="text-emerald-500">Econoplan</span></p>
+          <h2 className="text-2xl font-bold text-foreground flex items-center gap-2">
+              <PieChart className="w-6 h-6 text-primary" />
+              Visão Geral
+          </h2>
+          <p className="text-muted-foreground">Resumo financeiro pessoal em tempo real.</p>
         </div>
-        <div className="flex gap-2 items-center">
+        <div className="flex gap-2 items-center w-full md:w-auto">
            <DatePickerWithRange keysToReset={['chart']} />
-           
-           <span className="hidden md:flex px-3 py-1 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-500 text-xs items-center gap-1 h-8">
-             <ShieldCheck className="w-3 h-3" /> Ambiente Seguro
-           </span>
+           {/* Removi o badge de "Ambiente Seguro" para limpar a UI e alinhar com OrgPage */}
         </div>
       </div>
 
+      {/* KPIS GERAIS (4 Colunas se possível, ou 3 adaptadas) */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card className="bg-card border-border shadow-sm">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
             <div className="flex items-center gap-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">Receitas</CardTitle>
                 <InfoHelp title="Receitas do Período">
-                    Soma de todas as entradas (salários, vendas, transferências recebidas) no período selecionado.
+                    Soma de entradas operacionais no período.
                 </InfoHelp>
             </div>
             <div className="p-2 bg-emerald-500/10 rounded-lg"><ArrowUpRight className="w-4 h-4 text-emerald-500" /></div>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-foreground">{formatCurrency(data.monthlyIncome)}</div>
+            <div className="text-2xl font-bold text-emerald-500">{formatCurrency(data.monthlyIncome)}</div>
           </CardContent>
         </Card>
 
         <Card className="bg-card border-border shadow-sm">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
             <div className="flex items-center gap-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">Despesas</CardTitle>
                 <InfoHelp title="Despesas do Período">
-                    Total de gastos (compras, contas pagas, saídas) no período. Inclui gastos no débito e pagamentos de fatura.
+                    Total de saídas operacionais no período.
                 </InfoHelp>
             </div>
             <div className="p-2 bg-rose-500/10 rounded-lg"><ArrowDownRight className="w-4 h-4 text-rose-500" /></div>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-foreground">{formatCurrency(data.monthlyExpense)}</div>
+            <div className="text-2xl font-bold text-rose-500">{formatCurrency(data.monthlyExpense)}</div>
           </CardContent>
         </Card>
 
-        <Card className="bg-card border-border shadow-sm border-t-4 border-t-cyan-500">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <Card className="bg-card border-border shadow-sm">
+          <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
             <div className="flex items-center gap-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Saldo Total</CardTitle>
+                <CardTitle className="text-sm font-medium text-muted-foreground">Patrimônio</CardTitle>
                 <InfoHelp title="Patrimônio Líquido">
-                    Soma atualizada de todas as suas contas bancárias cadastradas. Não considera limites de cartão de crédito.
+                    Saldo acumulado de todas as contas.
                 </InfoHelp>
             </div>
             <div className="p-2 bg-cyan-500/10 rounded-lg"><DollarSign className="w-4 h-4 text-cyan-500" /></div>
