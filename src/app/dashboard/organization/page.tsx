@@ -54,8 +54,9 @@ export default async function OrganizationPage({
   }
 
   // Tratamento de filtros para evitar strings "undefined"
-  const filterWorkspaceId = (params.filterWorkspace && params.filterWorkspace !== 'ALL') ? params.filterWorkspace : undefined;
-  const filterType = (params.filterType && params.filterType !== 'ALL') ? params.filterType : undefined;
+  // CORREÇÃO: Usando chaves padronizadas (workspaceId, type) compatíveis com o novo DataFilter
+  const filterWorkspaceId = (params.workspaceId && params.workspaceId !== 'ALL') ? params.workspaceId : (params.filterWorkspace && params.filterWorkspace !== 'ALL' ? params.filterWorkspace : undefined);
+  const filterType = (params.type && params.type !== 'ALL') ? params.type : (params.filterType && params.filterType !== 'ALL' ? params.filterType : undefined);
 
   // 1. DADOS DE ANALYTICS (GRÁFICOS E TOTAIS)
   // Substitui a lógica manual anterior pela chamada da função dedicada

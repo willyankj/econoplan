@@ -299,15 +299,15 @@ export async function getTenantHealthScore(filterWorkspaceId?: string) {
     // Ignore: Transferências internas
 
     const totalIncome = transactions
-        .filter(t => t.type === 'INCOME')
+        .filter(t => t.type === TRANSACTION_TYPES.INCOME)
         .reduce((acc, t) => acc + toDecimal(t.amount), 0);
 
     const totalExpense = transactions
-        .filter(t => t.type === 'EXPENSE')
+        .filter(t => t.type === TRANSACTION_TYPES.EXPENSE)
         .reduce((acc, t) => acc + toDecimal(t.amount), 0);
 
     const totalSavings = transactions
-        .filter(t => t.type === 'VAULT_DEPOSIT')
+        .filter(t => t.type === TRANSACTION_TYPES.VAULT_DEPOSIT)
         .reduce((acc, t) => acc + toDecimal(t.amount), 0);
 
     const totalBalance = accounts.reduce((acc, a) => acc + toDecimal(a.balance), 0);
@@ -415,16 +415,16 @@ export async function getTenantAnalytics(period: string, type?: string, workspac
         const val = Number(t.amount);
 
         // Agregação Correta por Tipo
-        if (t.type === 'INCOME') {
+        if (t.type === TRANSACTION_TYPES.INCOME) {
             entry.income += val;
             totalIncome += val;
-        } else if (t.type === 'EXPENSE') {
+        } else if (t.type === TRANSACTION_TYPES.EXPENSE) {
             entry.expense += val;
             totalExpense += val;
-        } else if (t.type === 'TRANSFER') {
+        } else if (t.type === TRANSACTION_TYPES.TRANSFER) {
             entry.transfer += val;
             totalTransfer += val;
-        } else if (t.type === 'VAULT_DEPOSIT' || t.type === 'VAULT_WITHDRAW') {
+        } else if (t.type === TRANSACTION_TYPES.VAULT_DEPOSIT || t.type === TRANSACTION_TYPES.VAULT_WITHDRAW) {
             // Investment: Consideramos o volume movimentado (valor absoluto) ou apenas aportes?
             // Geralmente em gráficos de barras queremos ver o VOLUME.
             entry.investment += val;
