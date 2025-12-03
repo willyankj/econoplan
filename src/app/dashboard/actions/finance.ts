@@ -269,7 +269,8 @@ export async function upsertTransaction(formData: FormData, id?: string) {
                 await recalculateGoalBalance(updatedVault.goalId, tx);
             }
 
-            const catType = isDeposit ? 'EXPENSE' : 'INCOME';
+            // CORREÇÃO: Usar o tipo real (VAULT_DEPOSIT ou VAULT_WITHDRAW) na categoria
+            const catType = type;
             const category = await tx.category.upsert({
                 where: { workspaceId_name_type: { workspaceId: vault.bankAccount.workspaceId, name: "Metas", type: catType } },
                 update: {},
@@ -737,7 +738,10 @@ export async function transferVault(vaultId: string, amount: number, type: 'DEPO
           await recalculateGoalBalance(updatedVault.goalId, tx);
       }
 
-      const catType = isDeposit ? 'EXPENSE' : 'INCOME';
+      // CORREÇÃO: Usar o tipo real para categoria também
+      const txType = isDeposit ? 'VAULT_DEPOSIT' : 'VAULT_WITHDRAW';
+      const catType = txType;
+
       const category = await tx.category.upsert({
           where: { workspaceId_name_type: { workspaceId: userAccount.workspaceId, name: "Metas", type: catType } },
           update: {},
@@ -748,7 +752,7 @@ export async function transferVault(vaultId: string, amount: number, type: 'DEPO
         data: {
           description: isDeposit ? `Aporte: ${vault.name}` : `Resgate: ${vault.name}`,
           amount,
-          type: isDeposit ? 'VAULT_DEPOSIT' : 'VAULT_WITHDRAW',
+          type: txType,
           date: new Date(),
           workspaceId: userAccount.workspaceId,
           bankAccountId: userAccount.id,

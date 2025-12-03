@@ -2,13 +2,16 @@
 
 import { prisma } from "@/lib/prisma";
 import { validateUser, getActiveWorkspaceId } from "@/lib/action-utils";
-import { addMonths, startOfMonth, endOfMonth, format, subMonths, differenceInCalendarMonths, isBefore, addWeeks, addYears, isSameMonth } from "date-fns";
+import {
+    startOfMonth, endOfMonth, format, subMonths,
+    differenceInCalendarMonths, isBefore, addMonths, addWeeks, addYears,
+    formatMonthYear, formatMonthShort, getMonthKey
+} from "@/lib/date-utils";
 import { ptBR } from "date-fns/locale";
-
-const toDecimal = (num: any) => Number(num) || 0;
+import { toDecimal, TRANSACTION_TYPES } from "@/lib/finance-utils";
 
 // ============================================================================
-// 1. ORÁCULO FINANCEIRO
+// 1. ORÁCULO FINANCEIRO (FLUXO DE CAIXA PROJETADO)
 // ============================================================================
 export async function getTenantOracleData(filterWorkspaceId?: string, dateRange?: { from: Date, to: Date }) {
   const { user } = await validateUser('org_view');
@@ -27,11 +30,13 @@ export async function getTenantOracleData(filterWorkspaceId?: string, dateRange?
     ? { id: filterWorkspaceId, tenantId: user.tenantId }
     : { tenantId: user.tenantId };
 
+  // 1. Saldo Inicial (Todas as Contas)
   const accounts = await prisma.bankAccount.findMany({
     where: { workspace: workspaceFilter }
   });
   let currentBalance = accounts.reduce((acc, cur) => acc + toDecimal(cur.balance), 0);
 
+  // 2. Transações Futuras (Reais, já lançadas)
   const futureTransactions = await prisma.transaction.findMany({
     where: {
       workspace: workspaceFilter,
@@ -39,6 +44,7 @@ export async function getTenantOracleData(filterWorkspaceId?: string, dateRange?
     }
   });
 
+  // 3. Definições de Recorrência
   const recurringDefs = await prisma.transaction.findMany({
     where: {
       workspace: workspaceFilter,
@@ -47,20 +53,32 @@ export async function getTenantOracleData(filterWorkspaceId?: string, dateRange?
     }
   });
 
+  // Mapa de Projeção (Income/Expense previstos via recorrência)
   const projectionMap = new Map<string, { income: number, expense: number }>();
 
   recurringDefs.forEach(def => {
       let pointer = new Date(def.nextRecurringDate!);
       
       while (pointer <= projectUntil) {
-          const key = format(pointer, 'yyyy-MM');
+          const key = getMonthKey(pointer);
           
           if (!projectionMap.has(key)) projectionMap.set(key, { income: 0, expense: 0 });
           const entry = projectionMap.get(key)!;
 
-          if (def.type === 'INCOME') entry.income += toDecimal(def.amount);
-          else entry.expense += toDecimal(def.amount);
+          // Lógica de Projeção:
+          // INCOME -> Soma em Income
+          // EXPENSE -> Soma em Expense
+          // VAULT_DEPOSIT -> Soma em Expense (sai do caixa operacional)
+          // VAULT_WITHDRAW -> Soma em Income (entra no caixa operacional)
+          // TRANSFER -> Ignora (neutro globalmente)
 
+          if (def.type === 'INCOME' || def.type === 'VAULT_WITHDRAW') {
+              entry.income += toDecimal(def.amount);
+          } else if (def.type === 'EXPENSE' || def.type === 'VAULT_DEPOSIT') {
+              entry.expense += toDecimal(def.amount);
+          }
+
+          // Avança pointer
           if (def.frequency === 'WEEKLY') pointer = addWeeks(pointer, 1);
           else if (def.frequency === 'YEARLY') pointer = addYears(pointer, 1);
           else pointer = addMonths(pointer, 1);
@@ -74,19 +92,30 @@ export async function getTenantOracleData(filterWorkspaceId?: string, dateRange?
     const currentDate = addMonths(today, i);
     const monthStart = startOfMonth(currentDate);
     const monthEnd = endOfMonth(currentDate);
-    const monthLabel = format(currentDate, 'MMM', { locale: ptBR }).toUpperCase();
-    const monthKey = format(currentDate, 'yyyy-MM');
+    const monthLabel = formatMonthShort(currentDate);
+    const monthKey = getMonthKey(currentDate);
 
+    // Transações REAIS (lançadas no futuro)
     const monthRealTx = futureTransactions.filter(t => t.date >= monthStart && t.date <= monthEnd);
-    const incomeReal = monthRealTx.filter(t => t.type === 'INCOME').reduce((sum, t) => sum + toDecimal(t.amount), 0);
-    const expenseReal = monthRealTx.filter(t => t.type === 'EXPENSE').reduce((sum, t) => sum + toDecimal(t.amount), 0);
 
+    // Filtra e Soma Reais
+    const incomeReal = monthRealTx
+        .filter(t => t.type === 'INCOME' || t.type === 'VAULT_WITHDRAW')
+        .reduce((sum, t) => sum + toDecimal(t.amount), 0);
+
+    const expenseReal = monthRealTx
+        .filter(t => t.type === 'EXPENSE' || t.type === 'VAULT_DEPOSIT')
+        .reduce((sum, t) => sum + toDecimal(t.amount), 0);
+
+    // Dados Projetados (Recorrência)
     const projected = projectionMap.get(monthKey) || { income: 0, expense: 0 };
 
+    // Totalização
     const totalIncome = incomeReal + projected.income;
     const totalExpense = expenseReal + projected.expense;
     const netChange = totalIncome - totalExpense;
     
+    // Atualiza saldo acumulado
     runningBalance += netChange;
 
     timeline.push({
@@ -137,7 +166,7 @@ export async function getTenantDebtXRayData(filterWorkspaceId?: string) {
   
     for (let i = 0; i < 12; i++) {
         const d = addMonths(today, i);
-        const key = format(d, 'MMM/yy', { locale: ptBR }).toUpperCase();
+        const key = formatMonthYear(d); // Ex: JAN/24
         monthsMap.set(key, { name: key, total: 0 }); 
     }
   
@@ -148,6 +177,7 @@ export async function getTenantDebtXRayData(filterWorkspaceId?: string) {
         const closingDay = t.creditCard.closingDay;
         const dueDay = t.creditCard.dueDay;
   
+        // Lógica simplificada de vencimento
         let referenceClosingDate = new Date(txDate.getFullYear(), txDate.getMonth(), closingDay);
         if (txDate.getDate() >= closingDay) {
             referenceClosingDate = addMonths(referenceClosingDate, 1);
@@ -158,7 +188,7 @@ export async function getTenantDebtXRayData(filterWorkspaceId?: string) {
             dueDate = addMonths(dueDate, 1);
         }
   
-        const key = format(dueDate, 'MMM/yy', { locale: ptBR }).toUpperCase();
+        const key = formatMonthYear(dueDate);
         const cardName = t.creditCard.name;
         cardSet.add(cardName);
   
@@ -193,7 +223,7 @@ export async function getWorkspaceCategoryComparison() {
     const transactions = await prisma.transaction.findMany({
         where: {
             workspaceId,
-            type: 'EXPENSE',
+            type: 'EXPENSE', // Apenas despesas reais para comparação
             date: { gte: pastStart, lte: currentEnd },
             categoryId: { not: null }
         },
@@ -245,7 +275,7 @@ export async function getTenantHealthScore(filterWorkspaceId?: string) {
     if (!user) return { score: 0, metrics: {} };
 
     const today = new Date();
-    const start = subMonths(today, 1);
+    const start = subMonths(today, 1); // Analisa últimos 30 dias (aprox)
 
     const workspaceFilter = filterWorkspaceId 
     ? { id: filterWorkspaceId, tenantId: user.tenantId }
@@ -262,20 +292,48 @@ export async function getTenantHealthScore(filterWorkspaceId?: string) {
         where: { workspace: workspaceFilter }
     });
 
-    const totalIncome = transactions.filter(t => t.type === 'INCOME').reduce((acc, t) => acc + toDecimal(t.amount), 0);
-    const totalExpense = transactions.filter(t => t.type === 'EXPENSE').reduce((acc, t) => acc + toDecimal(t.amount), 0);
+    // --- CORREÇÃO DE CONCEITO ---
+    // Income: Receita Operacional (Salário, Vendas)
+    // Expense: Despesa Operacional (Contas, Compras)
+    // Investment: Aportes em Cofrinhos (Poupança)
+    // Ignore: Transferências internas
+
+    const totalIncome = transactions
+        .filter(t => t.type === 'INCOME')
+        .reduce((acc, t) => acc + toDecimal(t.amount), 0);
+
+    const totalExpense = transactions
+        .filter(t => t.type === 'EXPENSE')
+        .reduce((acc, t) => acc + toDecimal(t.amount), 0);
+
+    const totalSavings = transactions
+        .filter(t => t.type === 'VAULT_DEPOSIT')
+        .reduce((acc, t) => acc + toDecimal(t.amount), 0);
+
     const totalBalance = accounts.reduce((acc, a) => acc + toDecimal(a.balance), 0);
 
+    // Savings Rate = (Receita - Despesa) / Receita.
+    // Se houve aporte, o dinheiro "sobrou" da despesa, então a conta (Income - Expense) já inclui o que foi poupado?
+    // Ex: Ganhei 100. Gastei 60. Sobrou 40. Desses 40, botei 30 no cofrinho.
+    // Income=100, Expense=60. (Net=40). SavingsRate = 40%.
+    // O aporte de 30 é apenas uma alocação do Net.
+    // Portanto, NÃO devemos somar o Aporte como Despesa. E a fórmula (Inc-Exp)/Inc está correta.
+    // O Aporte serve para validar se o usuário está REALMENTE poupando, mas matematicamente a taxa de poupança potencial é Inc - Exp.
+
     const savingsRate = totalIncome > 0 ? ((totalIncome - totalExpense) / totalIncome) * 100 : 0;
+
     let savingsScore = 0;
     if (savingsRate >= 20) savingsScore = 40;
     else if (savingsRate > 0) savingsScore = savingsRate * 2;
     else savingsScore = 0;
 
+    // Se o usuário fez aportes explícitos, damos um bônus se a savingsRate calculada não for alta o suficiente?
+    // Por enquanto manteremos a lógica simples: Receita - Despesa = Capacidade de Poupança.
+
     const monthlyAvgExpense = totalExpense || 1; 
     const coverageMonths = totalBalance / monthlyAvgExpense;
     let coverageScore = 0;
-    if (coverageMonths >= 3) coverageScore = 40;
+    if (coverageMonths >= 3) coverageScore = 40; // 3 meses de reserva de emergência
     else coverageScore = (coverageMonths / 3) * 40;
 
     let budgetScore = 20;
@@ -294,7 +352,7 @@ export async function getTenantHealthScore(filterWorkspaceId?: string) {
 }
 
 // ============================================================================
-// 5. ANALYTICS GERAL DO TENANT (CORREÇÃO: Adicionada função que faltava)
+// 5. ANALYTICS GERAL DO TENANT
 // ============================================================================
 export async function getTenantAnalytics(period: string, type?: string, workspaceId?: string) {
     const { user } = await validateUser('org_view');
@@ -314,7 +372,6 @@ export async function getTenantAnalytics(period: string, type?: string, workspac
         startDate = new Date(2000, 0, 1);
     }
 
-    // Filtros
     const where: any = {
         workspace: { tenantId: user.tenantId },
         date: { gte: startDate, lte: endDate }
@@ -342,7 +399,6 @@ export async function getTenantAnalytics(period: string, type?: string, workspac
         }
     });
 
-    // Processamento
     const chartDataMap = new Map();
     let totalIncome = 0;
     let totalExpense = 0;
@@ -350,24 +406,30 @@ export async function getTenantAnalytics(period: string, type?: string, workspac
     let totalInvestment = 0;
 
     data.forEach(t => {
-        // Agregação para o gráfico
         const day = format(t.date, 'dd/MM');
+
         if (!chartDataMap.has(day)) {
             chartDataMap.set(day, { name: day, income: 0, expense: 0, transfer: 0, investment: 0 });
         }
         const entry = chartDataMap.get(day);
         const val = Number(t.amount);
 
-        if (t.type === 'INCOME') entry.income += val;
-        else if (t.type === 'EXPENSE') entry.expense += val;
-        else if (t.type === 'TRANSFER') entry.transfer += val;
-        else if (t.type === 'VAULT_DEPOSIT' || t.type === 'VAULT_WITHDRAW') entry.investment += val;
-
-        // Totais Gerais
-        if (t.type === 'INCOME') totalIncome += val;
-        else if (t.type === 'EXPENSE') totalExpense += val;
-        else if (t.type === 'TRANSFER') totalTransfer += val;
-        else if (t.type.startsWith('VAULT')) totalInvestment += val;
+        // Agregação Correta por Tipo
+        if (t.type === 'INCOME') {
+            entry.income += val;
+            totalIncome += val;
+        } else if (t.type === 'EXPENSE') {
+            entry.expense += val;
+            totalExpense += val;
+        } else if (t.type === 'TRANSFER') {
+            entry.transfer += val;
+            totalTransfer += val;
+        } else if (t.type === 'VAULT_DEPOSIT' || t.type === 'VAULT_WITHDRAW') {
+            // Investment: Consideramos o volume movimentado (valor absoluto) ou apenas aportes?
+            // Geralmente em gráficos de barras queremos ver o VOLUME.
+            entry.investment += val;
+            totalInvestment += val;
+        }
     });
 
     return {
