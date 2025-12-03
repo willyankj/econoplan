@@ -25,6 +25,9 @@ export const formatDate = (date: Date | string | number, formatStr: string = 'dd
     return formatDateFns(new Date(date), formatStr, LOCALE_OPTIONS);
 };
 
+// Alias para compatibilidade com código que espera 'format'
+export const format = formatDate;
+
 export const startOfMonth = (date: Date = new Date()) => startOfMonthFns(date);
 export const endOfMonth = (date: Date = new Date()) => endOfMonthFns(date);
 export const addMonths = (date: Date, amount: number) => addMonthsFns(date, amount);
