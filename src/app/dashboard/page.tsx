@@ -40,8 +40,7 @@ export default async function DashboardPage({
   searchParams
 }: {
   searchParams: Promise<{ 
-    month?: string, from?: string, to?: string,
-    chartMonth?: string, chartFrom?: string, chartTo?: string 
+    month?: string, from?: string, to?: string
   }>
 }) {
   const { workspaceId } = await getUserWorkspace();
@@ -49,11 +48,6 @@ export default async function DashboardPage({
 
   const params = await searchParams;
   const globalDates = getDatesFromParams(params.from, params.to, params.month);
-
-  const hasChartFilter = !!(params.chartFrom && params.chartTo) || !!params.chartMonth;
-  const chartDates = hasChartFilter 
-    ? getDatesFromParams(params.chartFrom, params.chartTo, params.chartMonth)
-    : globalDates;
 
   // 1. SALDO TOTAL
   const rawAccounts = await prisma.bankAccount.findMany({ where: { workspaceId }, orderBy: { name: 'asc' } });
@@ -72,23 +66,23 @@ export default async function DashboardPage({
 
   // 3. DADOS DO GRÁFICO
   const chartTransactions = await prisma.transaction.findMany({
-      where: { workspaceId, creditCardId: null, date: { gte: chartDates.startDate, lte: chartDates.endDate } },
+      where: { workspaceId, creditCardId: null, date: { gte: globalDates.startDate, lte: globalDates.endDate } },
       select: { date: true, amount: true, type: true },
       orderBy: { date: 'asc' }
   });
 
-  const diffDays = Math.ceil(Math.abs(chartDates.endDate.getTime() - chartDates.startDate.getTime()) / (1000 * 60 * 60 * 24)); 
+  const diffDays = Math.ceil(Math.abs(globalDates.endDate.getTime() - globalDates.startDate.getTime()) / (1000 * 60 * 60 * 24));
   const isDailyChart = diffDays <= 35;
   const chartMap = new Map();
 
   if (isDailyChart) {
-      for (let d = new Date(chartDates.startDate); d <= chartDates.endDate; d.setDate(d.getDate() + 1)) {
+      for (let d = new Date(globalDates.startDate); d <= globalDates.endDate; d.setDate(d.getDate() + 1)) {
           const key = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
           chartMap.set(key, { name: key, income: 0, expense: 0 });
       }
   } else {
-      let d = new Date(chartDates.startDate);
-      while (d <= chartDates.endDate) {
+      let d = new Date(globalDates.startDate);
+      while (d <= globalDates.endDate) {
           const monthKey = d.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '');
           const formattedKey = monthKey.charAt(0).toUpperCase() + monthKey.slice(1);
           if (!chartMap.has(formattedKey)) chartMap.set(formattedKey, { name: formattedKey, income: 0, expense: 0 });

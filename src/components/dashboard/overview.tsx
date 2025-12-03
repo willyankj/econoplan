@@ -114,8 +114,6 @@ export function DashboardOverview({ data }: { data: DashboardData }) {
         
         <Card className="lg:col-span-2 bg-card border-border shadow-sm">
           <div className="p-6 flex items-center gap-2">
-             <DatePickerWithRange prefix="chart" />
-             
              <h3 className="font-semibold text-lg text-foreground">Fluxo de Caixa</h3>
              <InfoHelp title="Histórico Financeiro">
                 Acompanhe a evolução das suas entradas (verde) e saídas (vermelho) ao longo do tempo. Ideal para identificar meses com gastos atípicos.
