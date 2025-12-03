@@ -160,7 +160,8 @@ export function GoalModal({ goal, isShared = false, workspaces = [], accounts = 
                 </>
             )}
 
-            <div className={`p-6 pb-8 ${isShared ? "bg-purple-50 dark:bg-purple-950/20" : "bg-amber-50 dark:bg-amber-950/20"}`}>
+            {/* HEADER VISUAL PADRONIZADO */}
+            <div className={`p-6 pb-8 transition-colors duration-300 ${isShared ? "bg-purple-50 dark:bg-purple-950/20" : "bg-amber-50 dark:bg-amber-950/20"}`}>
                 <DialogHeader className="mb-4">
                     <DialogTitle className="text-center text-muted-foreground font-medium text-sm uppercase flex items-center justify-center gap-2">
                         {isShared ? <Users className="w-4 h-4" /> : <Target className="w-4 h-4" />}
@@ -169,23 +170,33 @@ export function GoalModal({ goal, isShared = false, workspaces = [], accounts = 
                 </DialogHeader>
 
                 <div className="relative flex justify-center items-center">
-                    <span className={`text-2xl font-medium mr-2 opacity-50`}>R$</span>
-                    <Input name="targetAmount" type="number" step="0.01" placeholder="0,00" defaultValue={goal?.targetAmount} className="text-5xl font-bold text-center border-none bg-transparent h-16 w-full shadow-none focus-visible:ring-0" required readOnly={isLinkingOnly} />
+                    <span className={`text-2xl font-medium mr-2 opacity-50 ${isShared ? 'text-purple-500' : 'text-amber-500'}`}>R$</span>
+                    <Input
+                        name="targetAmount"
+                        type="number"
+                        step="0.01"
+                        placeholder="0,00"
+                        defaultValue={goal?.targetAmount}
+                        className={`text-5xl font-bold text-center border-none shadow-none bg-transparent focus-visible:ring-0 h-16 w-full placeholder:text-muted-foreground/30 ${isShared ? 'text-purple-500' : 'text-amber-500'} [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
+                        required
+                        readOnly={isLinkingOnly}
+                        autoFocus={!isEditing && !isLinkingOnly}
+                    />
                 </div>
-                <p className="text-center text-xs text-muted-foreground mt-2">Valor TOTAL da meta</p>
+                <p className="text-center text-xs text-muted-foreground mt-2">Qual o valor total do objetivo?</p>
             </div>
 
             <div className="p-6 space-y-5">
                 {!isLinkingOnly && (
                     <>
                     <div className="grid gap-1.5">
-                        <Label className="text-xs text-muted-foreground ml-1">Nome</Label>
-                        <Input name="name" defaultValue={goal?.name} placeholder="Ex: Viagem, Carro..." required />
+                        <Label className="text-xs text-muted-foreground ml-1">Nome do Objetivo</Label>
+                        <Input name="name" defaultValue={goal?.name} placeholder="Ex: Viagem, Carro Novo..." className="bg-muted/50 border-transparent focus:border-primary focus:bg-background transition-all h-11" required />
                     </div>
 
                     <div className="grid gap-1.5">
                         <Label className="text-xs text-muted-foreground ml-1 flex items-center gap-1"><Calendar className="w-3 h-3"/> Prazo (Opcional)</Label>
-                        <Input name="deadline" type="date" defaultValue={formattedDeadline} />
+                        <Input name="deadline" type="date" defaultValue={formattedDeadline} className="bg-muted/50 border-transparent focus:border-primary focus:bg-background transition-all h-11" />
                     </div>
                     </>
                 )}
@@ -253,12 +264,12 @@ export function GoalModal({ goal, isShared = false, workspaces = [], accounts = 
                             <TabsContent value="new" className="space-y-3 mt-0">
                                 <div className="grid gap-1.5">
                                     <Label className="text-xs text-muted-foreground">Nome do seu Cofrinho</Label>
-                                    <Input name="myVaultName" defaultValue={goal ? `Cofre ${goal.name}` : ''} placeholder="Ex: Meu Pote da Viagem" className="h-9" />
+                                    <Input name="myVaultName" defaultValue={goal ? `Cofre ${goal.name}` : ''} placeholder="Ex: Meu Pote da Viagem" className="h-11 bg-background" />
                                 </div>
                                 <div className="grid gap-1.5">
-                                    <Label className="text-xs text-muted-foreground">Conta Bancária</Label>
+                                    <Label className="text-xs text-muted-foreground">Conta Bancária (Onde o dinheiro ficará)</Label>
                                     <Select name="myVaultAccountId">
-                                        <SelectTrigger className="h-9"><SelectValue placeholder="Selecione..." /></SelectTrigger>
+                                        <SelectTrigger className="h-11 bg-background"><SelectValue placeholder="Selecione a conta..." /></SelectTrigger>
                                         <SelectContent>
                                             {accounts.map(acc => (
                                                 <SelectItem key={acc.id} value={acc.id}>
@@ -269,12 +280,12 @@ export function GoalModal({ goal, isShared = false, workspaces = [], accounts = 
                                     </Select>
                                 </div>
                                 <div className="grid gap-1.5">
-                                    <Label className="text-xs text-muted-foreground">Saldo Inicial (Já guardado)</Label>
+                                    <Label className="text-xs text-muted-foreground">Saldo Inicial (Opcional)</Label>
                                     <div className="relative">
-                                        <span className="absolute left-2.5 top-2.5 text-xs text-muted-foreground font-bold">R$</span>
-                                        <Input name="initialBalance" type="number" step="0.01" placeholder="0.00" className="h-9 pl-7" />
+                                        <span className="absolute left-3 top-3.5 text-xs text-muted-foreground font-bold">R$</span>
+                                        <Input name="initialBalance" type="number" step="0.01" placeholder="0.00" className="h-11 pl-8 bg-background" />
                                     </div>
-                                    <p className="text-[10px] text-muted-foreground">Valor que você já tem guardado fora da plataforma.</p>
+                                    <p className="text-[10px] text-muted-foreground">Caso já tenha algum valor guardado.</p>
                                 </div>
                             </TabsContent>
 
@@ -282,7 +293,7 @@ export function GoalModal({ goal, isShared = false, workspaces = [], accounts = 
                                 <div className="grid gap-1.5">
                                     <Label className="text-xs text-muted-foreground">Selecione o cofrinho</Label>
                                     <Select name="myExistingVaultId">
-                                        <SelectTrigger className="h-9"><SelectValue placeholder="Selecione..." /></SelectTrigger>
+                                        <SelectTrigger className="h-11 bg-background"><SelectValue placeholder="Selecione..." /></SelectTrigger>
                                         <SelectContent>
                                             {availableVaults.map(v => (
                                                 <SelectItem key={v.id} value={v.id}>
@@ -294,7 +305,7 @@ export function GoalModal({ goal, isShared = false, workspaces = [], accounts = 
                                             ))}
                                         </SelectContent>
                                     </Select>
-                                    <p className="text-[10px] text-muted-foreground">Este cofrinho será vinculado a esta meta e seu saldo será somado ao total.</p>
+                                    <p className="text-[10px] text-muted-foreground">O saldo atual deste cofrinho será somado à meta.</p>
                                 </div>
                             </TabsContent>
                         </Tabs>
@@ -314,8 +325,12 @@ export function GoalModal({ goal, isShared = false, workspaces = [], accounts = 
                     </div>
                 )}
 
-                <Button type="submit" disabled={isLoading} className="w-full font-bold h-12 mt-2">
-                    {isLoading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : (isLinkingOnly ? "Vincular e Começar" : "Salvar")}
+                <Button
+                    type="submit"
+                    disabled={isLoading}
+                    className={`w-full font-bold h-12 mt-2 text-white shadow-md transition-all hover:scale-[1.02] ${isShared ? 'bg-purple-600 hover:bg-purple-500' : 'bg-amber-500 hover:bg-amber-400'}`}
+                >
+                    {isLoading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : (isLinkingOnly ? "Vincular e Começar" : "Salvar Objetivo")}
                 </Button>
             </div>
         </form>
