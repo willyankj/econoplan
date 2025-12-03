@@ -84,6 +84,8 @@ export function OrgFilters({ workspaces }: OrgFiltersProps) {
                     <SelectItem value="ALL">Todos</SelectItem>
                     <SelectItem value="INCOME">Receitas</SelectItem>
                     <SelectItem value="EXPENSE">Despesas</SelectItem>
+                    <SelectItem value="TRANSFER">Transferências</SelectItem>
+                    <SelectItem value="INVESTMENT">Metas / Aportes</SelectItem>
                 </SelectContent>
             </Select>
           </div>

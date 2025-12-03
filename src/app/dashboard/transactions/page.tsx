@@ -9,7 +9,7 @@ import { CreditCard, CheckCircle2, Clock, CheckCheck, PiggyBank } from "lucide-r
 import * as Icons from "lucide-react"; 
 
 import { DeleteTransactionButton } from "./delete-button";
-import { TransactionModal } from "@/components/dashboard/transaction-modal"; // Modal Principal
+import { TransactionModal } from "@/components/dashboard/transaction-modal"; 
 import { TransactionFilterButton } from "./filter-button";
 import { SearchInput } from "./search-input";
 import { ExportButton } from "./export-button";
@@ -41,6 +41,35 @@ export default async function TransactionsPage({
 
   const categories = await prisma.category.findMany({ where: { workspaceId }, orderBy: { name: 'asc' } });
 
+  const rawGoals = await prisma.goal.findMany({
+    where: {
+      OR: [
+        { workspaceId: workspaceId }, 
+        { tenantId: user.tenantId, workspaceId: null } 
+      ]
+    },
+    include: { vaults: { include: { bankAccount: true } } },
+    orderBy: { name: 'asc' }
+  });
+  
+  const goals = rawGoals
+    .map(g => {
+        const myVault = g.vaults.find(v => v.bankAccount.workspaceId === workspaceId);
+        if (!myVault) return null;
+        return {
+            id: g.id,
+            name: g.name,
+            currentAmount: Number(g.currentAmount),
+            vaultId: myVault.id,
+            vault: {
+                ...myVault,
+                balance: Number(myVault.balance),
+                bankAccount: myVault.bankAccount
+            }
+        };
+    })
+    .filter(g => g !== null);
+
   const recurringTransactions = await getRecurringTransactions();
 
   const whereCondition: any = { 
@@ -54,9 +83,17 @@ export default async function TransactionsPage({
     ];
   }
   
-  if (params.type && params.type !== 'ALL') whereCondition.type = params.type;
-  if (params.accountId) whereCondition.bankAccountId = params.accountId;
-  if (params.cardId) whereCondition.creditCardId = params.cardId;
+  // CORREÇÃO DOS FILTROS
+  if (params.type && params.type !== 'ALL') {
+      if (params.type === 'INVESTMENT') {
+          whereCondition.type = { in: ['VAULT_DEPOSIT', 'VAULT_WITHDRAW'] };
+      } else {
+          whereCondition.type = params.type;
+      }
+  }
+
+  if (params.accountId && params.accountId !== 'ALL') whereCondition.bankAccountId = params.accountId;
+  if (params.cardId && params.cardId !== 'ALL') whereCondition.creditCardId = params.cardId;
   
   if (params.categoryId && params.categoryId !== 'ALL') {
       whereCondition.categoryId = params.categoryId;
@@ -73,7 +110,12 @@ export default async function TransactionsPage({
     where: whereCondition,
     orderBy: { date: 'desc' },
     take: 100,
-    include: { category: true, bankAccount: true, creditCard: true }
+    include: { 
+        category: true, 
+        bankAccount: true, 
+        creditCard: true,
+        vault: { include: { goal: true } }
+    }
   });
 
   const transactionsForExport = transactions.map(t => ({
@@ -106,13 +148,11 @@ export default async function TransactionsPage({
             <TransactionFilterButton accounts={accounts} cards={cards} categories={categories} />
             <ExportButton data={transactionsForExport} />
 
-            {/* MUDANÇA: Botão Nova Transação movido para cá */}
-            <TransactionModal accounts={accounts} cards={cards} categories={categories} />
+            <TransactionModal accounts={accounts} cards={cards} categories={categories} goals={goals} />
           </div>
       </div>
 
       <Card className="bg-card border-border shadow-sm overflow-hidden mx-1">
-        {/* MUDANÇA: Removi o TransactionModal daqui de baixo para não duplicar e limpei o header */}
         <CardHeader className="border-b border-border bg-muted/40 px-6 py-4 flex flex-row justify-between items-center gap-4">
             <SearchInput />
         </CardHeader>
@@ -138,23 +178,26 @@ export default async function TransactionsPage({
                     };
 
                     const isInvestment = 
-                        t.category?.name === "Metas" || 
-                        t.category?.name === "Resgate de Metas" ||
-                        t.category?.name === "Investimentos" || 
-                        t.description.startsWith("Depósito Meta") ||
-                        t.description.startsWith("Resgate Meta");
+                        t.type === 'VAULT_DEPOSIT' || 
+                        t.type === 'VAULT_WITHDRAW' ||
+                        t.category?.name === "Metas" ||
+                        t.vaultId;
 
                     return (
                     <TableRow key={t.id} className="border-border hover:bg-muted/50 transition-colors">
                     <TableCell className="font-medium text-foreground">
                         <div className="flex flex-col">
                             <div className="flex items-center gap-2">
-                                <div className={`w-2 h-2 rounded-full ${t.type === 'INCOME' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                                <div className={`w-2 h-2 rounded-full ${
+                                    t.type === 'INCOME' || t.type === 'VAULT_WITHDRAW' ? 'bg-emerald-500' : 
+                                    (t.type === 'TRANSFER' ? 'bg-blue-500' : 'bg-rose-500')
+                                }`} />
                                 {t.description}
                             </div>
                             {isInvestment && (
-                                <span className="text-[10px] text-emerald-500 flex items-center gap-1 ml-4 mt-1">
-                                    <PiggyBank className="w-3 h-3" /> Meta / Investimento
+                                <span className="text-[10px] text-amber-500 flex items-center gap-1 ml-4 mt-1">
+                                    <PiggyBank className="w-3 h-3" /> 
+                                    {t.vault?.goal?.name ? `Meta: ${t.vault.goal.name}` : (t.vault?.name || "Investimento")}
                                 </span>
                             )}
                         </div>
@@ -213,13 +256,15 @@ export default async function TransactionsPage({
                     <TableCell className="text-muted-foreground">
                         {t.date.toLocaleDateString('pt-BR')}
                     </TableCell>
-                    <TableCell className={`text-right font-bold ${t.type === 'INCOME' ? 'text-emerald-600' : 'text-rose-600'}`}>
-                        {t.type === 'INCOME' ? '+' : '-'} {formatCurrency(Number(t.amount))}
+                    <TableCell className={`text-right font-bold ${
+                        t.type === 'INCOME' || t.type === 'VAULT_WITHDRAW' ? 'text-emerald-600' : (t.type === 'TRANSFER' ? 'text-blue-500' : 'text-rose-600')
+                    }`}>
+                        {t.type === 'INCOME' || t.type === 'VAULT_WITHDRAW' ? '+' : '-'} {formatCurrency(Number(t.amount))}
                     </TableCell>
                     
                     <TableCell className="text-right">
                         <div className="flex justify-end items-center gap-1">
-                            <TransactionModal transaction={transactionForModal} accounts={accounts} cards={cards} categories={categories} />
+                            <TransactionModal transaction={transactionForModal} accounts={accounts} cards={cards} categories={categories} goals={goals} />
                             <DeleteTransactionButton id={t.id} />
                         </div>
                     </TableCell>

@@ -2,16 +2,16 @@
 
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { VaultManager } from "../vaults/vault-manager"; // Certifique-se que o arquivo anterior está nesta pasta
+import { VaultManager } from "../vaults/vault-manager";
 import { PiggyBank } from "lucide-react";
 
 interface VaultDialogProps {
     accountId: string;
     vaults: any[];
+    allAccounts: any[]; // <--- NOVO
 }
 
-export function VaultDialog({ accountId, vaults }: VaultDialogProps) {
-  // Calcula o total guardado em todos os cofrinhos desta conta
+export function VaultDialog({ accountId, vaults, allAccounts }: VaultDialogProps) {
   const totalInVaults = vaults.reduce((acc, v) => acc + Number(v.balance), 0);
 
   return (
@@ -26,9 +26,15 @@ export function VaultDialog({ accountId, vaults }: VaultDialogProps) {
            )}
         </Button>
       </DialogTrigger>
-      {/* O DialogContent abre o Gerenciador que criamos antes */}
+      
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
-         <VaultManager accountId={accountId} vaults={vaults} />
+         {/* Passamos accountName opcional ou buscamos da lista, e passamos allAccounts */}
+         <VaultManager 
+            accountId={accountId} 
+            accountName={allAccounts.find(a => a.id === accountId)?.name || "Conta"}
+            vaults={vaults} 
+            allAccounts={allAccounts} 
+         />
       </DialogContent>
     </Dialog>
   )

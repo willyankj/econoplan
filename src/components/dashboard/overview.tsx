@@ -11,7 +11,7 @@ import { Progress } from "@/components/ui/progress";
 import { DepositGoalModal } from "@/components/dashboard/goals/deposit-goal-modal";
 import { formatCurrency } from "@/lib/utils";
 import { InfoHelp } from "@/components/dashboard/info-help";
-import { DateMonthSelector } from "@/components/dashboard/date-month-selector"; // <--- REINSERIDO
+import { DateMonthSelector } from "@/components/dashboard/date-month-selector";
 
 interface DashboardData {
   totalBalance: number;
@@ -51,7 +51,6 @@ export function DashboardOverview({ data }: { data: DashboardData }) {
           <p className="text-muted-foreground">Dados em tempo real do <span className="text-emerald-500">Econoplan</span></p>
         </div>
         <div className="flex gap-2 items-center">
-           {/* SELETOR GLOBAL VOLTOU AQUI */}
            <DateMonthSelector keysToReset={['chart']} />
            
            <span className="hidden md:flex px-3 py-1 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-500 text-xs items-center gap-1 h-8">
@@ -113,7 +112,6 @@ export function DashboardOverview({ data }: { data: DashboardData }) {
         
         <Card className="lg:col-span-2 bg-card border-border shadow-sm">
           <div className="p-6 flex items-center gap-2">
-             {/* SELETOR ESPECÍFICO (NO ÍCONE) VOLTOU AQUI */}
              <DateMonthSelector prefix="chart" isIconTrigger={true} />
              
              <h3 className="font-semibold text-lg text-foreground">Fluxo de Caixa</h3>
@@ -211,10 +209,11 @@ export function DashboardOverview({ data }: { data: DashboardData }) {
                             return (
                                 <div key={goal.id} className="space-y-2">
                                     <div className="flex justify-between items-center">
-                                        <span className="text-sm text-foreground font-medium">{goal.name}</span>
+                                        <span className="text-sm text-foreground font-medium truncate max-w-[120px]">{goal.name}</span>
                                         <div className="flex items-center gap-2">
                                             <span className="text-xs text-muted-foreground">{percent.toFixed(0)}%</span>
-                                            <div className="transform scale-75 origin-right">
+                                            {/* BOTÃO DE APORTE INTEGRADO AQUI */}
+                                            <div className="transform scale-90">
                                                 <DepositGoalModal 
                                                     goal={goal} 
                                                     accounts={data.accounts} 

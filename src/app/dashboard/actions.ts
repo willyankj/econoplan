@@ -25,9 +25,9 @@ import {
   stopTransactionRecurrence as _stopTransactionRecurrence,
   getRecurringTransactions as _getRecurringTransactions,
   getUpcomingBills as _getUpcomingBills,
-  upsertVault as _upsertVault,       // <--- NOVO
-  deleteVault as _deleteVault,       // <--- NOVO
-  transferVault as _transferVault    // <--- NOVO
+  upsertVault as _upsertVault,
+  deleteVault as _deleteVault,
+  transferVault as _transferVault
 } from './actions/finance';
 
 import {
@@ -47,13 +47,12 @@ import {
     deleteCategory as _deleteCategory
 } from './actions/categories';
 
-// ANALYTICS (IMPORTADOS DIRETAMENTE DO ARQUIVO ORIGINAL PARA EVITAR ERRO DE LINK)
-// A melhor prática é importar analytics direto na página, mas se você usa via actions.ts, precisa exportar:
 import {
     getWorkspaceCategoryComparison as _getWorkspaceCategoryComparison,
     getTenantOracleData as _getTenantOracleData,
     getTenantDebtXRayData as _getTenantDebtXRayData,
-    getTenantHealthScore as _getTenantHealthScore
+    getTenantHealthScore as _getTenantHealthScore,
+    getTenantAnalytics as _getTenantAnalytics // <--- IMPORTADO AQUI
 } from './actions/analytics';
 
 
@@ -85,9 +84,9 @@ export const importTransactions = _importTransactions;
 export const stopTransactionRecurrence = _stopTransactionRecurrence;
 export const getRecurringTransactions = _getRecurringTransactions;
 export const getUpcomingBills = _getUpcomingBills;
-export const upsertVault = _upsertVault;       // <--- NOVO
-export const deleteVault = _deleteVault;       // <--- NOVO
-export const transferVault = _transferVault;   // <--- NOVO
+export const upsertVault = _upsertVault;
+export const deleteVault = _deleteVault;
+export const transferVault = _transferVault;
 
 // Categories
 export const upsertCategory = _upsertCategory;
@@ -106,8 +105,9 @@ export const markNotificationAsRead = _markNotificationAsRead;
 export const markAllNotificationsAsRead = _markAllNotificationsAsRead;
 export const checkDeadlinesAndSendAlerts = _checkDeadlinesAndSendAlerts;
 
-// Analytics (Novos Exports)
+// Analytics
 export const getWorkspaceCategoryComparison = _getWorkspaceCategoryComparison;
 export const getTenantOracleData = _getTenantOracleData;
 export const getTenantDebtXRayData = _getTenantDebtXRayData;
 export const getTenantHealthScore = _getTenantHealthScore;
+export const getTenantAnalytics = _getTenantAnalytics; // <--- EXPORTADO AQUI

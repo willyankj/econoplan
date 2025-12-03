@@ -1,3 +1,5 @@
+// src/components/dashboard/transaction-modal.tsx
+
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -7,8 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Loader2, CalendarIcon, Plus, CreditCard as CreditCardIcon, RefreshCw, Layers, Pencil } from "lucide-react";
-import { upsertTransaction } from '@/app/dashboard/actions';
+import { Loader2, CalendarIcon, Plus, CreditCard as CreditCardIcon, RefreshCw, Layers, Pencil, ArrowUp, ArrowDown, PiggyBank } from "lucide-react";
+import { upsertTransaction } from '@/app/dashboard/actions/finance';
 import { toast } from "sonner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
@@ -27,23 +29,36 @@ interface TransactionModalProps {
   accounts: any[];
   cards: any[];
   categories: any[];
+  goals?: any[]; // Nova prop
   children?: React.ReactNode;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }
 
-export function TransactionModal({ transaction, accounts, cards, categories, children, open: controlledOpen, onOpenChange }: TransactionModalProps) {
+// Tipo estendido para controle de tela
+type ModalType = 'EXPENSE' | 'INCOME' | 'TRANSFER' | 'INVESTMENT';
+
+export function TransactionModal({ transaction, accounts, cards, categories, goals = [], children, open: controlledOpen, onOpenChange }: TransactionModalProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const isOpen = controlledOpen !== undefined ? controlledOpen : internalOpen;
   const setOpen = onOpenChange || setInternalOpen;
 
   const [isLoading, setIsLoading] = useState(false);
-  const [type, setType] = useState<'EXPENSE' | 'INCOME' | 'TRANSFER'>(transaction?.type || 'EXPENSE');
-  const [date, setDate] = useState<Date>(transaction?.date ? new Date(transaction.date) : new Date());
   
-  // Controle de Abas/Método de Pagamento
-  const [paymentMethod, setPaymentMethod] = useState(transaction?.creditCardId ? "card" : "account");
+  // Define o tipo inicial
+  const getInitialType = (): ModalType => {
+      if (!transaction) return 'EXPENSE';
+      if (transaction.type === 'VAULT_DEPOSIT' || transaction.type === 'VAULT_WITHDRAW') return 'INVESTMENT';
+      return transaction.type as ModalType;
+  };
 
+  const [type, setType] = useState<ModalType>(getInitialType());
+  const [investmentType, setInvestmentType] = useState<'DEPOSIT' | 'WITHDRAW'>(
+      transaction?.type === 'VAULT_WITHDRAW' ? 'WITHDRAW' : 'DEPOSIT'
+  );
+
+  const [date, setDate] = useState<Date>(transaction?.date ? new Date(transaction.date) : new Date());
+  const [paymentMethod, setPaymentMethod] = useState(transaction?.creditCardId ? "card" : "account");
   const [isRecurring, setIsRecurring] = useState(transaction?.isRecurring || !!transaction?.isInstallment || false);
   const [recurrence, setRecurrence] = useState(transaction?.frequency || (transaction?.isInstallment ? 'INSTALLMENT' : 'MONTHLY'));
   const [installments, setInstallments] = useState(transaction?.installmentTotal || 2);
@@ -51,12 +66,29 @@ export function TransactionModal({ transaction, accounts, cards, categories, chi
   const [showAccountModal, setShowAccountModal] = useState(false);
   const [showCardModal, setShowCardModal] = useState(false);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const [selectedGoalId, setSelectedGoalId] = useState<string>(transaction?.goalId || transaction?.vault?.goal?.id || "");
 
   const isEditing = !!transaction;
-  const themeColor = type === 'EXPENSE' ? 'text-rose-500' : (type === 'INCOME' ? 'text-emerald-500' : 'text-blue-500');
-  const themeBg = type === 'EXPENSE' ? 'bg-rose-500' : (type === 'INCOME' ? 'bg-emerald-500' : 'bg-blue-500');
 
-  // Resetar recorrência inválida se mudar método de pagamento
+  // Definição de cores e temas
+  let themeColor = 'text-rose-500';
+  let themeBg = 'bg-rose-500';
+  let lightBg = 'bg-rose-50 dark:bg-rose-950/20';
+
+  if (type === 'INCOME') {
+      themeColor = 'text-emerald-500';
+      themeBg = 'bg-emerald-500';
+      lightBg = 'bg-emerald-50 dark:bg-emerald-950/20';
+  } else if (type === 'TRANSFER') {
+      themeColor = 'text-blue-500';
+      themeBg = 'bg-blue-500';
+      lightBg = 'bg-blue-50 dark:bg-blue-950/20';
+  } else if (type === 'INVESTMENT') {
+      themeColor = 'text-amber-500';
+      themeBg = 'bg-amber-500';
+      lightBg = 'bg-amber-50 dark:bg-amber-950/20';
+  }
+
   useEffect(() => {
     if (paymentMethod === 'account' && recurrence === 'INSTALLMENT') {
         setRecurrence('MONTHLY');
@@ -68,21 +100,33 @@ export function TransactionModal({ transaction, accounts, cards, categories, chi
     setIsLoading(true);
     const formData = new FormData(event.currentTarget);
     formData.set('date', date.toISOString().split('T')[0]);
-    formData.set('type', type);
     
-    // Forçar paymentMethod correto baseado na aba ativa
-    if (type !== 'TRANSFER') {
+    // Mapeamento de tipos para o backend
+    if (type === 'INVESTMENT') {
+        formData.set('type', investmentType === 'DEPOSIT' ? 'VAULT_DEPOSIT' : 'VAULT_WITHDRAW');
+        // Para investimentos, o goalId selecionado é importante
+        const selectedGoal = goals.find(g => g.id === selectedGoalId);
+        if (selectedGoal) {
+            formData.set('vaultId', selectedGoal.vaultId); // O backend precisa do VaultID
+        }
+    } else {
+        formData.set('type', type);
+    }
+    
+    if (type !== 'TRANSFER' && type !== 'INVESTMENT') {
         formData.set('paymentMethod', paymentMethod === 'card' ? 'CREDIT_CARD' : 'ACCOUNT');
     }
 
-    if (isRecurring) {
+    if (isRecurring && type !== 'INVESTMENT') {
         formData.set('recurrence', recurrence);
         if (recurrence === 'INSTALLMENT') {
             formData.set('installments', installments.toString());
         }
     }
+    
     const result = await upsertTransaction(formData, transaction?.id);
     setIsLoading(false);
+    
     if (result?.error) {
         toast.error("Erro ao salvar", { description: result.error });
     } else {
@@ -96,6 +140,8 @@ export function TransactionModal({ transaction, accounts, cards, categories, chi
       const Icon = Icons[iconName] || Icons.Circle;
       return <Icon className="w-4 h-4 mr-2" style={{ color: color }} />;
   };
+
+  const selectedGoal = goals.find(g => g.id === selectedGoalId);
 
   return (
     <>
@@ -118,7 +164,7 @@ export function TransactionModal({ transaction, accounts, cards, categories, chi
       <DialogContent className="bg-card border-border text-card-foreground sm:max-w-[500px] max-h-[90vh] overflow-y-auto scrollbar-thin p-0 gap-0 rounded-xl overflow-hidden">
         
         <form onSubmit={handleSubmit} className="flex flex-col">
-            <div className={`p-6 pb-8 transition-colors duration-300 ${type === 'EXPENSE' ? 'bg-rose-50 dark:bg-rose-950/20' : (type === 'INCOME' ? 'bg-emerald-50 dark:bg-emerald-950/20' : 'bg-blue-50 dark:bg-blue-950/20')}`}>
+            <div className={`p-6 pb-8 transition-colors duration-300 ${lightBg}`}>
                 <DialogHeader className="mb-4">
                     <DialogTitle className="text-center text-muted-foreground font-medium text-sm uppercase tracking-wider">
                         {isEditing ? "Editar Movimentação" : "Nova Movimentação"}
@@ -130,11 +176,13 @@ export function TransactionModal({ transaction, accounts, cards, categories, chi
                     <Input name="amount" type="number" step="0.01" placeholder="0,00" defaultValue={transaction?.amount} className={`text-5xl font-bold text-center border-none shadow-none bg-transparent focus-visible:ring-0 h-16 w-full placeholder:text-muted-foreground/30 ${themeColor} [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`} autoFocus={!isEditing} required />
                 </div>
 
+                {/* --- SELETOR DE 4 TIPOS --- */}
                 <div className="flex justify-center mt-6">
-                    <div className="bg-background/50 p-1 rounded-full border border-border shadow-sm flex gap-1">
-                        <button type="button" onClick={() => setType('EXPENSE')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${type === 'EXPENSE' ? 'bg-rose-500 text-white shadow-md' : 'text-muted-foreground hover:bg-muted'}`}>Despesa</button>
-                        <button type="button" onClick={() => setType('INCOME')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${type === 'INCOME' ? 'bg-emerald-500 text-white shadow-md' : 'text-muted-foreground hover:bg-muted'}`}>Receita</button>
-                        <button type="button" onClick={() => setType('TRANSFER')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${type === 'TRANSFER' ? 'bg-blue-500 text-white shadow-md' : 'text-muted-foreground hover:bg-muted'}`}>Transf.</button>
+                    <div className="bg-background/50 p-1 rounded-full border border-border shadow-sm flex flex-wrap justify-center gap-1">
+                        <button type="button" onClick={() => setType('EXPENSE')} className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${type === 'EXPENSE' ? 'bg-rose-500 text-white shadow-md' : 'text-muted-foreground hover:bg-muted'}`}>Despesa</button>
+                        <button type="button" onClick={() => setType('INCOME')} className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${type === 'INCOME' ? 'bg-emerald-500 text-white shadow-md' : 'text-muted-foreground hover:bg-muted'}`}>Receita</button>
+                        <button type="button" onClick={() => setType('TRANSFER')} className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${type === 'TRANSFER' ? 'bg-blue-500 text-white shadow-md' : 'text-muted-foreground hover:bg-muted'}`}>Transf.</button>
+                        <button type="button" onClick={() => setType('INVESTMENT')} className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${type === 'INVESTMENT' ? 'bg-amber-500 text-white shadow-md' : 'text-muted-foreground hover:bg-muted'}`}>Metas</button>
                     </div>
                 </div>
             </div>
@@ -143,7 +191,7 @@ export function TransactionModal({ transaction, accounts, cards, categories, chi
                 <div className="grid grid-cols-[1fr,auto] gap-3">
                     <div className="grid gap-1.5">
                         <Label className="text-xs text-muted-foreground ml-1">Descrição</Label>
-                        <Input name="description" placeholder="Ex: Mercado..." defaultValue={transaction?.description} className="bg-muted/50 border-transparent focus:border-primary focus:bg-background transition-all" required />
+                        <Input name="description" placeholder="Ex: Pagamento..." defaultValue={transaction?.description} className="bg-muted/50 border-transparent focus:border-primary focus:bg-background transition-all" required />
                     </div>
                     <div className="grid gap-1.5 w-[140px]">
                         <Label className="text-xs text-muted-foreground ml-1">Data</Label>
@@ -158,7 +206,80 @@ export function TransactionModal({ transaction, accounts, cards, categories, chi
                     </div>
                 </div>
 
-                {type !== 'TRANSFER' && (
+                {/* --- CONTEÚDO PARA METAS/INVESTIMENTOS --- */}
+                {type === 'INVESTMENT' && (
+                     <div className="flex flex-col gap-4 bg-amber-50/50 dark:bg-amber-900/10 p-4 rounded-xl border border-amber-100 dark:border-amber-800/30">
+                        <div className="flex gap-2 p-1 bg-background/50 rounded-lg border border-border/50">
+                             <button type="button" onClick={() => setInvestmentType('DEPOSIT')} className={`flex-1 flex items-center justify-center gap-2 py-1.5 text-xs font-bold rounded-md transition-all ${investmentType === 'DEPOSIT' ? 'bg-emerald-500 text-white shadow' : 'text-muted-foreground hover:bg-background'}`}>
+                                <ArrowUp className="w-3 h-3" /> Guardar (Aporte)
+                             </button>
+                             <button type="button" onClick={() => setInvestmentType('WITHDRAW')} className={`flex-1 flex items-center justify-center gap-2 py-1.5 text-xs font-bold rounded-md transition-all ${investmentType === 'WITHDRAW' ? 'bg-amber-500 text-white shadow' : 'text-muted-foreground hover:bg-background'}`}>
+                                <ArrowDown className="w-3 h-3" /> Resgatar
+                             </button>
+                        </div>
+
+                        <div className="grid gap-1.5">
+                            <Label className="text-xs text-amber-600 dark:text-amber-400 font-bold ml-1">Qual Meta?</Label>
+                            <Select name="goalId" value={selectedGoalId} onValueChange={setSelectedGoalId}>
+                                <SelectTrigger className="bg-background border-border text-foreground w-full"><SelectValue placeholder="Selecione a meta..." /></SelectTrigger>
+                                <SelectContent>
+                                    {goals.map(g => (
+                                        <SelectItem key={g.id} value={g.id}>
+                                            <div className="flex items-center gap-2">
+                                                <PiggyBank className="w-4 h-4 text-amber-500" />
+                                                <span>{g.name}</span>
+                                                <span className="text-xs text-muted-foreground ml-auto">
+                                                    (Saldo: {formatCurrency(g.vault?.balance || 0)})
+                                                </span>
+                                            </div>
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        
+                        {selectedGoal && selectedGoal.vault?.bankAccount && (
+                             <div className="text-[10px] text-muted-foreground flex items-center gap-2 p-2 bg-background/50 rounded border border-border/30">
+                                 <span>Conta vinculada:</span>
+                                 <BankLogo bankName={selectedGoal.vault.bankAccount.bank} className="w-3 h-3" />
+                                 <span className="font-medium">{selectedGoal.vault.bankAccount.name}</span>
+                             </div>
+                        )}
+                        <Input type="hidden" name="accountId" value={selectedGoal?.vault?.bankAccount?.id || ''} />
+                     </div>
+                )}
+
+                {/* --- CONTEÚDO PARA TRANSFERÊNCIAS --- */}
+                {type === 'TRANSFER' && (
+                    <div className="flex flex-col gap-4 bg-blue-50/50 dark:bg-blue-900/10 p-4 rounded-xl border border-blue-100 dark:border-blue-800/30">
+                        <div className="grid gap-1.5">
+                            <Label className="text-xs text-blue-600 dark:text-blue-400 font-bold ml-1">De onde sai?</Label>
+                            <div className="flex gap-2">
+                                <Select name="accountId">
+                                    <SelectTrigger className="bg-background border-border text-foreground w-full"><SelectValue placeholder="Conta Origem" /></SelectTrigger>
+                                    <SelectContent>{accounts.map(acc => (<SelectItem key={acc.id} value={acc.id}><div className="flex items-center gap-2"><BankLogo bankName={acc.bank} className="w-4 h-4" />{acc.name}</div></SelectItem>))}</SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+                        <div className="relative h-4 flex items-center justify-center">
+                            <div className="absolute inset-x-0 top-1/2 h-px bg-blue-200 dark:bg-blue-800/50"></div>
+                            <div className="relative bg-blue-50 dark:bg-slate-900 px-2 text-[10px] text-blue-400 uppercase font-bold">Para</div>
+                        </div>
+                        <div className="grid gap-1.5">
+                            <Label className="text-xs text-blue-600 dark:text-blue-400 font-bold ml-1">Para onde vai?</Label>
+                            <div className="flex gap-2">
+                                <Select name="destinationAccountId">
+                                    <SelectTrigger className="bg-background border-border text-foreground w-full"><SelectValue placeholder="Conta Destino" /></SelectTrigger>
+                                    <SelectContent>{accounts.map(acc => (<SelectItem key={acc.id} value={acc.id}><div className="flex items-center gap-2"><BankLogo bankName={acc.bank} className="w-4 h-4" />{acc.name}</div></SelectItem>))}</SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* --- CONTEÚDO PADRÃO (RECEITA/DESPESA) --- */}
+                {(type === 'EXPENSE' || type === 'INCOME') && (
+                    <>
                     <div className="grid gap-1.5">
                         <Label className="text-xs text-muted-foreground ml-1 flex justify-between">
                             Categoria
@@ -178,36 +299,7 @@ export function TransactionModal({ transaction, accounts, cards, categories, chi
                             <Button type="button" size="icon" variant="secondary" className="shrink-0" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowCategoryModal(true); }}><Plus className="w-4 h-4" /></Button>
                         </div>
                     </div>
-                )}
 
-                {type === 'TRANSFER' ? (
-                    <div className="flex flex-col gap-4 bg-blue-50/50 dark:bg-blue-900/10 p-4 rounded-xl border border-blue-100 dark:border-blue-800/30">
-                        <div className="grid gap-1.5">
-                            <Label className="text-xs text-blue-600 dark:text-blue-400 font-bold ml-1">De onde sai?</Label>
-                            <div className="flex gap-2">
-                                <Select name="accountId">
-                                    <SelectTrigger className="bg-background border-border text-foreground w-full"><SelectValue placeholder="Conta Origem" /></SelectTrigger>
-                                    <SelectContent>{accounts.map(acc => (<SelectItem key={acc.id} value={acc.id}><div className="flex items-center gap-2"><BankLogo bankName={acc.bank} className="w-4 h-4" />{acc.name}</div></SelectItem>))}</SelectContent>
-                                </Select>
-                                <Button type="button" size="icon" variant="secondary" className="shrink-0 bg-background hover:bg-muted" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowAccountModal(true); }}><Plus className="w-4 h-4" /></Button>
-                            </div>
-                        </div>
-                        <div className="relative h-4 flex items-center justify-center">
-                            <div className="absolute inset-x-0 top-1/2 h-px bg-blue-200 dark:bg-blue-800/50"></div>
-                            <div className="relative bg-blue-50 dark:bg-slate-900 px-2 text-[10px] text-blue-400 uppercase font-bold">Para</div>
-                        </div>
-                        <div className="grid gap-1.5">
-                            <Label className="text-xs text-blue-600 dark:text-blue-400 font-bold ml-1">Para onde vai?</Label>
-                            <div className="flex gap-2">
-                                <Select name="destinationAccountId">
-                                    <SelectTrigger className="bg-background border-border text-foreground w-full"><SelectValue placeholder="Conta Destino" /></SelectTrigger>
-                                    <SelectContent>{accounts.map(acc => (<SelectItem key={acc.id} value={acc.id}><div className="flex items-center gap-2"><BankLogo bankName={acc.bank} className="w-4 h-4" />{acc.name}</div></SelectItem>))}</SelectContent>
-                                </Select>
-                                <Button type="button" size="icon" variant="secondary" className="shrink-0 bg-background hover:bg-muted" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowAccountModal(true); }}><Plus className="w-4 h-4" /></Button>
-                            </div>
-                        </div>
-                    </div>
-                ) : (
                     <Tabs value={paymentMethod} onValueChange={setPaymentMethod} className="w-full">
                         <TabsList className="grid w-full grid-cols-2 h-9 bg-muted/50 p-1 mb-2">
                             <TabsTrigger value="account" className="text-xs font-medium">Conta Bancária</TabsTrigger>
@@ -238,9 +330,7 @@ export function TransactionModal({ transaction, accounts, cards, categories, chi
                             </div>
                         </TabsContent>
                     </Tabs>
-                )}
-
-                {type !== 'TRANSFER' && (
+                    
                     <div className="bg-muted/30 p-3 rounded-lg border border-border/50">
                         <div className="flex items-center space-x-2">
                             <Checkbox id="recurring" checked={isRecurring} onCheckedChange={(c) => setIsRecurring(!!c)} />
@@ -256,7 +346,6 @@ export function TransactionModal({ transaction, accounts, cards, categories, chi
                                             <SelectItem value="MONTHLY">Mensal (Fixo)</SelectItem>
                                             <SelectItem value="WEEKLY">Semanal</SelectItem>
                                             <SelectItem value="YEARLY">Anual</SelectItem>
-                                            {/* Correção: Parcelamento APENAS para Despesas no Cartão */}
                                             {type === 'EXPENSE' && paymentMethod === 'card' && <SelectItem value="INSTALLMENT">Parcelado</SelectItem>}
                                         </SelectContent>
                                     </Select>
@@ -273,6 +362,7 @@ export function TransactionModal({ transaction, accounts, cards, categories, chi
                             </div>
                         )}
                     </div>
+                    </>
                 )}
 
                 <Button type="submit" disabled={isLoading} className={`w-full text-white font-bold h-12 shadow-md transition-all hover:scale-[1.02] ${themeBg} hover:opacity-90`}>

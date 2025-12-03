@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Wallet, CreditCard, Landmark } from "lucide-react";
 import { AccountModal } from "@/components/dashboard/accounts/account-modal"; 
 import { DeleteAccountButton } from "@/components/dashboard/accounts/delete-account-button"; 
-import { VaultDialog } from "@/components/dashboard/accounts/vault-dialog"; // <--- IMPORTAMOS O NOVO BOTÃO
+import { VaultDialog } from "@/components/dashboard/accounts/vault-dialog"; 
 import { BankLogo } from "@/components/ui/bank-logo";
 import { getUserWorkspace } from "@/lib/get-user-workspace";
 
@@ -12,12 +12,18 @@ export default async function AccountsPage() {
   
   if (!workspaceId) return <div>Selecione um workspace</div>;
 
-  // MUDANÇA 1: Adicionamos 'include: { vaults: true }' para buscar os cofrinhos
-  const accounts = await prisma.bankAccount.findMany({
+  const rawAccounts = await prisma.bankAccount.findMany({
     where: { workspaceId },
     orderBy: { balance: 'desc' },
     include: { vaults: true } 
   });
+
+  // Serializa os dados para evitar warnings de Decimal e prepara a lista completa
+  const accounts = rawAccounts.map(acc => ({
+      ...acc,
+      balance: Number(acc.balance),
+      vaults: acc.vaults.map(v => ({ ...v, balance: Number(v.balance) }))
+  }));
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
@@ -40,7 +46,7 @@ export default async function AccountsPage() {
             </div>
             <h3 className="text-xl font-bold text-foreground mb-2">Comece por aqui</h3>
             <p className="text-muted-foreground max-w-md mb-8">
-                Para controlar suas finanças, o primeiro passo é adicionar onde seu dinheiro está guardado (Carteira, Banco, etc).
+                Para controlar suas finanças, o primeiro passo é adicionar onde seu dinheiro está guardado.
             </p>
             <div className="transform scale-110">
                 <AccountModal />
@@ -69,8 +75,8 @@ export default async function AccountsPage() {
                     <CardContent className="relative z-10 pb-2">
                         <div className="mt-2">
                             <p className="text-xs text-muted-foreground uppercase tracking-wider">Saldo Disponível</p>
-                            <h3 className={`text-2xl font-bold ${Number(account.balance) >= 0 ? 'text-foreground' : 'text-rose-600'}`}>
-                            {formatCurrency(Number(account.balance))}
+                            <h3 className={`text-2xl font-bold ${account.balance >= 0 ? 'text-foreground' : 'text-rose-600'}`}>
+                            {formatCurrency(account.balance)}
                             </h3>
                         </div>
                     </CardContent>
@@ -80,14 +86,16 @@ export default async function AccountsPage() {
                     <div className="mt-4 flex justify-between items-center pt-4 border-t border-border/50">
                         <div className="flex flex-col gap-1">
                             <p className="text-sm font-medium">{account.name}</p>
-                            {/* MUDANÇA 2: Mostramos o botão de Cofrinhos aqui */}
-                            <VaultDialog accountId={account.id} vaults={account.vaults} />
+                            {/* Passamos allAccounts aqui */}
+                            <VaultDialog 
+                                accountId={account.id} 
+                                vaults={account.vaults} 
+                                allAccounts={accounts} 
+                            />
                         </div>
                         
                         <div className="flex items-center gap-1">
-                            <AccountModal 
-                                account={{ ...account, balance: Number(account.balance) }} 
-                            />
+                            <AccountModal account={account} />
                             <DeleteAccountButton id={account.id} name={account.name} />
                         </div>
                     </div>

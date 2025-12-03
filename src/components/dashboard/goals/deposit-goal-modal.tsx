@@ -1,37 +1,65 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Plus, ArrowDown, Loader2, PiggyBank, ArrowUp } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Plus, ArrowDown, Loader2, PiggyBank, ArrowUp, CheckCircle2 } from "lucide-react";
 import { transferVault } from '@/app/dashboard/actions/finance';
 import { toast } from "sonner";
 import { BankLogo } from "@/components/ui/bank-logo";
+import { formatCurrency } from "@/lib/utils";
 
 interface DepositGoalModalProps {
     goal: any;
-    accounts?: any[]; // Não usado diretamente mais, pois o vínculo é fixo, mas mantido pra compatibilidade
+    accounts?: any[];
     type: "DEPOSIT" | "WITHDRAW";
+    defaultAccountId?: string; // NOVO: Permite forçar a conta
+    label?: string; // Texto do botão
 }
 
-export function DepositGoalModal({ goal, type }: DepositGoalModalProps) {
+export function DepositGoalModal({ goal, accounts = [], type, defaultAccountId, label }: DepositGoalModalProps) {
     const [open, setOpen] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
-    const [mode, setMode] = useState<'DEPOSIT' | 'WITHDRAW'>('DEPOSIT');
+    const [mode, setMode] = useState<'DEPOSIT' | 'WITHDRAW'>(type || 'DEPOSIT');
+    
+    // Tenta achar a conta vinculada pelo ID do cofrinho OU usa o defaultAccountId
+    const linkedAccount = accounts.find(acc => 
+        acc.id === defaultAccountId || acc.vaults?.some((v: any) => v.id === goal.vaultId)
+    );
 
-    // Se a meta não tem cofrinho vinculado, não permite operação (teoricamente não acontece mais com a regra nova)
-    if (!goal.vaultId) return null;
+    const [selectedAccountId, setSelectedAccountId] = useState<string>("");
+
+    useEffect(() => {
+        if (open) {
+            if (defaultAccountId) {
+                setSelectedAccountId(defaultAccountId);
+            } else if (linkedAccount) {
+                setSelectedAccountId(linkedAccount.id);
+            } else if (accounts.length > 0) {
+                setSelectedAccountId(accounts[0].id);
+            }
+        }
+    }, [open, defaultAccountId, linkedAccount, accounts]);
+
+    if (!goal.vaultId && !goal.id) return null; // Precisa de algum ID
+    const vaultId = goal.vaultId || goal.id; // Suporta passar o objeto goal ou o objeto vault direto
 
     async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
         event.preventDefault();
+        
+        if (!selectedAccountId) {
+            toast.error("Selecione uma conta bancária.");
+            return;
+        }
+
         setIsLoading(true);
         const formData = new FormData(event.currentTarget);
         const amount = Number(formData.get('amount'));
         
-        // Usa a action centralizada de cofrinho
-        const res = await transferVault(goal.vaultId, amount, mode);
+        const res = await transferVault(vaultId, amount, mode, selectedAccountId);
         
         setIsLoading(false);
         if (res?.error) {
@@ -49,8 +77,12 @@ export function DepositGoalModal({ goal, type }: DepositGoalModalProps) {
     return (
         <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
-                <Button className="flex-1 bg-primary text-primary-foreground shadow-sm h-8 text-xs font-semibold">
-                    <Plus className="w-3 h-3 mr-1" /> Aportar / Resgatar
+                <Button variant={label ? "default" : "outline"} size={label ? "default" : "icon"} className={label ? "flex-1 bg-primary text-primary-foreground shadow-sm h-8 text-xs font-semibold" : "h-8 w-8"}>
+                    {label ? (
+                        <><Plus className="w-3 h-3 mr-1" /> {label}</>
+                    ) : (
+                        <ArrowUp className="w-4 h-4" />
+                    )}
                 </Button>
             </DialogTrigger>
             <DialogContent className="sm:max-w-[400px]">
@@ -63,12 +95,14 @@ export function DepositGoalModal({ goal, type }: DepositGoalModalProps) {
 
                 <div className="flex gap-2 p-1 bg-muted rounded-lg mb-4 mt-2">
                     <button 
+                        type="button"
                         onClick={() => setMode('DEPOSIT')}
                         className={`flex-1 flex items-center justify-center gap-2 py-2 text-sm font-medium rounded-md transition-all ${mode === 'DEPOSIT' ? 'bg-emerald-500 text-white shadow' : 'text-muted-foreground hover:bg-background'}`}
                     >
                         <ArrowUp className="w-4 h-4" /> Aportar
                     </button>
                     <button 
+                        type="button"
                         onClick={() => setMode('WITHDRAW')}
                         className={`flex-1 flex items-center justify-center gap-2 py-2 text-sm font-medium rounded-md transition-all ${mode === 'WITHDRAW' ? 'bg-amber-500 text-white shadow' : 'text-muted-foreground hover:bg-background'}`}
                     >
@@ -77,13 +111,37 @@ export function DepositGoalModal({ goal, type }: DepositGoalModalProps) {
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-4">
-                    <div className="text-center py-4 bg-muted/30 rounded-lg border border-border/50">
+                    <div className="text-center py-4 bg-muted/30 rounded-lg border border-border/50 px-4">
                         <p className="text-xs text-muted-foreground mb-1">
                             {isDeposit 
-                                ? "O dinheiro sairá da conta e entrará na meta (cofrinho)." 
-                                : "O dinheiro sairá da meta e voltará para a conta."
+                                ? "O dinheiro sairá da conta selecionada e irá para o cofrinho." 
+                                : "O dinheiro sairá do cofrinho e voltará para a conta selecionada."
                             }
                         </p>
+                    </div>
+
+                    <div className="grid gap-2">
+                        <Label>{isDeposit ? "Debitar de qual conta?" : "Creditrar em qual conta?"}</Label>
+                        <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
+                            <SelectTrigger>
+                                <SelectValue placeholder="Selecione..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {accounts.map(acc => (
+                                    <SelectItem key={acc.id} value={acc.id}>
+                                        <div className="flex items-center gap-2 justify-between w-full">
+                                            <div className="flex items-center gap-2">
+                                                <BankLogo bankName={acc.bank} className="w-4 h-4" />
+                                                <span>{acc.name}</span>
+                                            </div>
+                                            <span className="text-xs text-muted-foreground font-mono">
+                                                {formatCurrency(acc.balance)}
+                                            </span>
+                                        </div>
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
                     </div>
 
                     <div className="grid gap-2">

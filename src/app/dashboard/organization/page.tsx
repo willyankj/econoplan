@@ -14,7 +14,12 @@ import { OrgFilters } from "@/components/dashboard/organization/org-filters";
 import { GoalAnalytics } from "@/components/dashboard/organization/goal-analytics"; 
 import { formatCurrency } from "@/lib/utils";
 import { InfoHelp } from "@/components/dashboard/info-help"; 
-import { getTenantOracleData, getTenantDebtXRayData, getTenantHealthScore } from "@/app/dashboard/actions/analytics";
+import { 
+    getTenantOracleData, 
+    getTenantDebtXRayData, 
+    getTenantHealthScore,
+    getTenantAnalytics // <--- Importando a função correta
+} from "@/app/dashboard/actions/analytics";
 import { FinancialOracle } from "@/components/dashboard/analytics/financial-oracle";
 import { DebtXRay } from "@/components/dashboard/analytics/debt-xray";
 import { HealthScore } from "@/components/dashboard/analytics/health-score";
@@ -48,76 +53,46 @@ export default async function OrganizationPage({
       endDate = new Date(d.getFullYear(), d.getMonth()+1, 0, 23,59,59);
   }
 
-  const filterWorkspaceId = params.filterWorkspace && params.filterWorkspace !== 'ALL' ? params.filterWorkspace : undefined;
-  const filterType = params.filterType && params.filterType !== 'ALL' ? params.filterType : undefined;
+  // Tratamento de filtros para evitar strings "undefined"
+  const filterWorkspaceId = (params.filterWorkspace && params.filterWorkspace !== 'ALL') ? params.filterWorkspace : undefined;
+  const filterType = (params.filterType && params.filterType !== 'ALL') ? params.filterType : undefined;
 
-  // --- FILTROS DE QUERY ---
+  // 1. DADOS DE ANALYTICS (GRÁFICOS E TOTAIS)
+  // Substitui a lógica manual anterior pela chamada da função dedicada
+  const analyticsData = await getTenantAnalytics(
+      'custom', // Período customizado (controlado pelas datas)
+      filterType || 'all', 
+      filterWorkspaceId || 'all'
+  );
+
+  // 2. KPIS GERAIS (Patrimônio Total independente de filtro de data, para contexto)
   const baseWhere = {
       tenantId,
       ...(filterWorkspaceId && { id: filterWorkspaceId })
   };
-  
-  const txWhere = {
-      workspace: { tenantId, ...(filterWorkspaceId && { id: filterWorkspaceId }) },
-      date: { gte: startDate, lte: endDate },
-      ...(filterType && { type: filterType as any })
-  };
-
-  // 1. KPIS (Agregados no Banco - Leve)
   const accounts = await prisma.bankAccount.findMany({ where: { workspace: baseWhere } });
   const totalBalance = accounts.reduce((acc, a) => acc + toDecimal(a.balance), 0);
 
-  const incomeAgg = await prisma.transaction.aggregate({ _sum: { amount: true }, where: { ...txWhere, type: 'INCOME', creditCardId: null } });
-  const expenseAgg = await prisma.transaction.aggregate({ _sum: { amount: true }, where: { ...txWhere, type: 'EXPENSE', creditCardId: null } });
-  
-  const totalIncome = toDecimal(incomeAgg._sum.amount);
-  const totalExpense = toDecimal(expenseAgg._sum.amount);
+  // Recalcula Saldo do Período (Receita - Despesa do filtro atual)
+  const periodBalance = analyticsData.totals.income - analyticsData.totals.expense;
 
-  // 2. DADOS PARA GRÁFICOS (Agregados por Grupo)
+  // 3. WIDGETS EXTRAS
   const workspacesList = await prisma.workspace.findMany({ where: { tenantId }, select: { id: true, name: true } });
-  const workspaceMap = new Map(workspacesList.map(w => [w.id, w.name]));
-
-  const byWorkspace = await prisma.transaction.groupBy({
-      by: ['workspaceId', 'type'],
-      _sum: { amount: true },
-      where: { ...txWhere, creditCardId: null }
-  });
-
-  const workspaceChartData: any[] = [];
-  // Processa o agrupamento para formato do gráfico
-  const wsDataMap = new Map();
-  byWorkspace.forEach(item => {
-      const wsName = workspaceMap.get(item.workspaceId) || 'Unknown';
-      if (!wsDataMap.has(wsName)) wsDataMap.set(wsName, { name: wsName, income: 0, expense: 0 });
-      const val = toDecimal(item._sum.amount);
-      if (item.type === 'INCOME') wsDataMap.get(wsName).income += val;
-      else wsDataMap.get(wsName).expense += val;
-  });
-  workspaceChartData.push(...Array.from(wsDataMap.values()));
-
-  // Categorias (Top 5)
-  const byCategory = await prisma.transaction.groupBy({
-      by: ['categoryId'],
-      _sum: { amount: true },
-      where: { ...txWhere, type: 'EXPENSE', creditCardId: null, categoryId: { not: null } },
-      orderBy: { _sum: { amount: 'desc' } },
-      take: 5
-  });
-
-  // Busca nomes das categorias (apenas as 5 usadas)
-  const catIds = byCategory.map(c => c.categoryId).filter(Boolean) as string[];
-  const categories = await prisma.category.findMany({ where: { id: { in: catIds } }, select: { id: true, name: true } });
-  const catNameMap = new Map(categories.map(c => [c.id, c.name]));
-
-  const categoryChartData = byCategory.map(c => ({
-      name: catNameMap.get(c.categoryId!) || 'Outros',
-      value: toDecimal(c._sum.amount)
-  }));
-
-  // 3. WIDGETS E LISTAS
+  
   const oracleData = await getTenantOracleData(filterWorkspaceId, { from: startDate, to: endDate });
   const debtData = await getTenantDebtXRayData(filterWorkspaceId);
   const healthData = await getTenantHealthScore(filterWorkspaceId);
+
+  // 4. TABELA RECENTE
+  // Query manual apenas para a lista detalhada, respeitando filtros
+  const txWhere: any = {
+      workspace: { tenantId, ...(filterWorkspaceId && { id: filterWorkspaceId }) },
+      date: { gte: startDate, lte: endDate },
+  };
+  if (filterType) {
+      if (filterType === 'INVESTMENT') txWhere.type = { in: ['VAULT_DEPOSIT', 'VAULT_WITHDRAW'] };
+      else txWhere.type = filterType;
+  }
 
   const recentTransactions = await prisma.transaction.findMany({
     where: txWhere,
@@ -126,13 +101,36 @@ export default async function OrganizationPage({
     include: { workspace: true, category: true }
   });
 
-  const sharedGoals = await prisma.goal.findMany({ where: { tenantId }, include: { transactions: true }, orderBy: { createdAt: 'desc' } });
-  const goalsWithDetails = sharedGoals.map(g => ({ ...g, targetAmount: Number(g.targetAmount), currentAmount: Number(g.currentAmount), transactions: g.transactions.map(t => ({...t, amount: Number(t.amount)})) }));
+  const transactionsForTable = recentTransactions.map(t => ({ 
+      id: t.id, 
+      description: t.description, 
+      amount: Number(t.amount), 
+      type: t.type, 
+      date: t.date, 
+      workspace: { name: t.workspace.name }, 
+      category: t.category ? { name: t.category.name } : null 
+  }));
+
+  // 5. METAS
+  const sharedGoals = await prisma.goal.findMany({ where: { tenantId }, include: { transactions: true, vaults: {include: {bankAccount: true}} }, orderBy: { createdAt: 'desc' } });
   
-  const userWorkspaces = await prisma.workspaceMember.findMany({ where: { userId: user.id }, include: { workspace: { include: { bankAccounts: true } } } });
-  const allUserAccounts = userWorkspaces.flatMap(wm => wm.workspace.bankAccounts.map(acc => ({...acc, balance: Number(acc.balance), workspaceName: wm.workspace.name})));
+  const goalsWithDetails = sharedGoals.map(g => {
+      const currentAmount = g.vaults.reduce((acc, v) => acc + Number(v.balance), 0);
+      return { 
+          ...g, 
+          targetAmount: Number(g.targetAmount), 
+          currentAmount: currentAmount, 
+          transactions: g.transactions.map(t => ({...t, amount: Number(t.amount)})) 
+      };
+  });
   
-  const transactionsForTable = recentTransactions.map(t => ({ id: t.id, description: t.description, amount: Number(t.amount), type: t.type, date: t.date, workspace: { name: t.workspace.name }, category: t.category ? { name: t.category.name } : null }));
+  const userWorkspaces = await prisma.workspaceMember.findMany({ where: { userId: user.id }, include: { workspace: { include: { bankAccounts: { include: { vaults: true } } } } } });
+  const allUserAccounts = userWorkspaces.flatMap(wm => wm.workspace.bankAccounts.map(acc => ({
+      ...acc, 
+      balance: Number(acc.balance), 
+      vaults: acc.vaults.map(v => ({...v, balance: Number(v.balance)})),
+      workspaceName: wm.workspace.name
+  })));
 
   return (
     <div className="space-y-8">
@@ -158,7 +156,7 @@ export default async function OrganizationPage({
             <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
                 <div className="flex items-center gap-2">
                     <CardTitle className="text-sm font-medium text-muted-foreground">Patrimônio</CardTitle>
-                    <InfoHelp title="Patrimônio Total">Soma de todos os saldos bancários de todos os workspaces da organização.</InfoHelp>
+                    <InfoHelp title="Patrimônio Total">Soma de todos os saldos bancários.</InfoHelp>
                 </div>
                 <div className="p-2 bg-blue-500/10 rounded-lg"><DollarSign className="w-4 h-4 text-blue-500" /></div>
             </CardHeader>
@@ -171,12 +169,12 @@ export default async function OrganizationPage({
             <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
                 <div className="flex items-center gap-2">
                     <CardTitle className="text-sm font-medium text-muted-foreground">Receita</CardTitle>
-                    <InfoHelp title="Receita do Período">Total de entradas efetivadas neste mês em todos os workspaces.</InfoHelp>
+                    <InfoHelp title="Receita do Período">Total de entradas no período filtrado.</InfoHelp>
                 </div>
                 <div className="p-2 bg-emerald-500/10 rounded-lg"><TrendingUp className="w-4 h-4 text-emerald-500" /></div>
             </CardHeader>
             <CardContent>
-                <div className="text-2xl font-bold text-emerald-500">{formatCurrency(totalIncome)}</div>
+                <div className="text-2xl font-bold text-emerald-500">{formatCurrency(analyticsData.totals.income)}</div>
             </CardContent>
         </Card>
 
@@ -184,12 +182,12 @@ export default async function OrganizationPage({
             <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
                 <div className="flex items-center gap-2">
                     <CardTitle className="text-sm font-medium text-muted-foreground">Despesa</CardTitle>
-                    <InfoHelp title="Despesa do Período">Total de saídas e gastos neste mês em todos os workspaces.</InfoHelp>
+                    <InfoHelp title="Despesa do Período">Total de saídas no período filtrado.</InfoHelp>
                 </div>
                 <div className="p-2 bg-rose-500/10 rounded-lg"><TrendingDown className="w-4 h-4 text-rose-500" /></div>
             </CardHeader>
             <CardContent>
-                <div className="text-2xl font-bold text-rose-500">{formatCurrency(totalExpense)}</div>
+                <div className="text-2xl font-bold text-rose-500">{formatCurrency(analyticsData.totals.expense)}</div>
             </CardContent>
         </Card>
 
@@ -197,13 +195,13 @@ export default async function OrganizationPage({
             <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
                 <div className="flex items-center gap-2">
                     <CardTitle className="text-sm font-medium text-muted-foreground">Saldo</CardTitle>
-                    <InfoHelp title="Fluxo Líquido">Resultado de (Receitas - Despesas) apenas dentro do período selecionado.</InfoHelp>
+                    <InfoHelp title="Fluxo Líquido">Resultado do período (Receita - Despesa).</InfoHelp>
                 </div>
                 <div className="p-2 bg-cyan-500/10 rounded-lg"><PieChart className="w-4 h-4 text-cyan-500" /></div>
             </CardHeader>
             <CardContent>
-                <div className={`text-2xl font-bold ${totalIncome - totalExpense >= 0 ? 'text-foreground' : 'text-rose-500'}`}>
-                    {formatCurrency(totalIncome - totalExpense)}
+                <div className={`text-2xl font-bold ${periodBalance >= 0 ? 'text-foreground' : 'text-rose-500'}`}>
+                    {formatCurrency(periodBalance)}
                 </div>
             </CardContent>
         </Card>
@@ -219,10 +217,10 @@ export default async function OrganizationPage({
           </div>
       </div>
 
-      {/* 3. DETALHAMENTO */}
+      {/* 3. DETALHAMENTO - PASSANDO OS DADOS CORRETOS */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
            <DebtXRay data={debtData.chartData} cardNames={debtData.cardNames} />
-           <TenantOverviewCharts workspaceData={workspaceChartData} categoryData={categoryChartData} />
+           <TenantOverviewCharts data={analyticsData} /> {/* <-- CORREÇÃO AQUI */}
       </div>
 
       {/* 4. TABELA RECENTE */}
@@ -238,7 +236,7 @@ export default async function OrganizationPage({
                 </h3>
                 <p className="text-sm text-muted-foreground">Acompanhamento detalhado de contribuições.</p>
             </div>
-            <GoalModal isShared={true} workspaces={workspacesList} />
+            <GoalModal isShared={true} workspaces={workspacesList} accounts={allUserAccounts} />
         </div>
 
         {goalsWithDetails.length === 0 ? (
@@ -257,7 +255,7 @@ export default async function OrganizationPage({
                                     <CardDescription>Meta Global: {formatCurrency(goal.targetAmount)}</CardDescription>
                                 </div>
                                 <div className="flex gap-2">
-                                    <GoalModal goal={goal} isShared={true} workspaces={workspacesList} />
+                                    <GoalModal goal={goal} isShared={true} workspaces={workspacesList} accounts={allUserAccounts} />
                                     <DepositGoalModal 
                                         goal={goal} 
                                         accounts={allUserAccounts} 
