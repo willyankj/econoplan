@@ -146,7 +146,6 @@ export default async function OrganizationPage({
             <p className="text-muted-foreground">Gestão centralizada da organização.</p>
         </div>
         <div className="flex items-center gap-2 w-full md:w-auto">
-            <DateMonthSelector />
             <OrgFilters workspaces={workspacesList} />
         </div>
       </div>
