@@ -85,6 +85,16 @@ export async function upsertAccount(formData: FormData, id?: string) {
 
   try {
     if (id) {
+      // SEGURANÇA: Verificar se a conta pertence ao tenant
+      const existing = await prisma.bankAccount.findUnique({
+          where: { id },
+          include: { workspace: true }
+      });
+
+      if (!existing || existing.workspace.tenantId !== user.tenantId) {
+          return { error: "Conta não encontrada ou sem permissão." };
+      }
+
       await prisma.bankAccount.update({ where: { id }, data });
       await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'UPDATE', entity: 'Account', entityId: id, details: `Editou conta ${data.name}` });
     } else {
@@ -103,7 +113,16 @@ export async function deleteAccount(id: string) {
   const { user, error } = await validateUser('accounts_delete');
   if (error || !user) return { error };
   try {
-    const acc = await prisma.bankAccount.findUnique({ where: { id } });
+    // SEGURANÇA: Verificar propriedade
+    const acc = await prisma.bankAccount.findUnique({
+        where: { id },
+        include: { workspace: true }
+    });
+
+    if (!acc || acc.workspace.tenantId !== user.tenantId) {
+        return { error: "Conta não encontrada ou sem permissão." };
+    }
+
     await prisma.bankAccount.delete({ where: { id } });
     await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'DELETE', entity: 'Account', details: `Apagou conta ${acc?.name}` });
   } catch (e) { return { error: "Erro ao excluir." }; }
@@ -148,6 +167,16 @@ export async function upsertCard(formData: FormData, id?: string) {
 
   try {
     if (id) {
+      // SEGURANÇA: Verificar propriedade
+      const existing = await prisma.creditCard.findUnique({
+          where: { id },
+          include: { workspace: true }
+      });
+
+      if (!existing || existing.workspace.tenantId !== user.tenantId) {
+          return { error: "Cartão não encontrado ou sem permissão." };
+      }
+
       await prisma.creditCard.update({ where: { id }, data });
       await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'UPDATE', entity: 'Card', entityId: id, details: `Atualizou cartão ${data.name}` });
     } else {
@@ -167,7 +196,16 @@ export async function deleteCreditCard(id: string) {
   const { user, error } = await validateUser('cards_delete');
   if (error || !user) return { error };
   try {
-    const card = await prisma.creditCard.findUnique({ where: { id } });
+    // SEGURANÇA: Verificar propriedade
+    const card = await prisma.creditCard.findUnique({
+        where: { id },
+        include: { workspace: true }
+    });
+
+    if (!card || card.workspace.tenantId !== user.tenantId) {
+        return { error: "Cartão não encontrado ou sem permissão." };
+    }
+
     await prisma.creditCard.delete({ where: { id } });
     await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'DELETE', entity: 'Card', details: `Apagou cartão ${card?.name}` });
   } catch (e) { return { error: "Erro ao excluir." }; }
@@ -233,8 +271,16 @@ export async function upsertTransaction(formData: FormData, id?: string) {
   let workspaceId = "";
 
   if (id) {
-      const oldT = await prisma.transaction.findUnique({ where: { id } });
-      if (!oldT) return { error: "Transação não encontrada" };
+      const oldT = await prisma.transaction.findUnique({
+          where: { id },
+          include: { workspace: true }
+      });
+
+      // SEGURANÇA: Verificar tenantId
+      if (!oldT || oldT.workspace.tenantId !== user.tenantId) {
+          return { error: "Transação não encontrada ou sem permissão." };
+      }
+
       workspaceId = oldT.workspaceId;
   } else {
       workspaceId = await getActiveWorkspaceId(user);
@@ -488,8 +534,15 @@ export async function deleteTransaction(id: string) {
   const { user, error } = await validateUser('transactions_delete');
   if (error || !user) return { error };
 
-  const t = await prisma.transaction.findUnique({ where: { id }, include: { vault: true } }); 
-  if (!t) return { error: "Não encontrado" };
+  // SEGURANÇA: Include workspace para checar tenant
+  const t = await prisma.transaction.findUnique({
+      where: { id },
+      include: { vault: true, workspace: true }
+  });
+
+  if (!t || t.workspace.tenantId !== user.tenantId) {
+      return { error: "Não encontrado ou sem permissão." };
+  }
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -705,6 +758,10 @@ export async function upsertVault(formData: FormData, id?: string) {
   try {
     await prisma.$transaction(async (tx) => {
         if (id) {
+            // SEGURANÇA
+            const existing = await tx.vault.findUnique({ where: { id }, include: { bankAccount: { include: { workspace: true } } } });
+            if (!existing || existing.bankAccount.workspace.tenantId !== user.tenantId) throw new Error("Cofrinho não encontrado ou sem permissão.");
+
             await tx.vault.update({ where: { id }, data: { name, targetAmount } });
         } else {
             // CORREÇÃO: Usando initialBalance
@@ -728,8 +785,13 @@ export async function deleteVault(id: string) {
     const { user, error } = await validateUser();
     if (error || !user) return { error };
 
-    const vault = await prisma.vault.findUnique({ where: { id } });
+    // SEGURANÇA
+    const vault = await prisma.vault.findUnique({
+        where: { id },
+        include: { bankAccount: { include: { workspace: true } } }
+    });
     if (!vault) return { error: "Cofrinho não encontrado" };
+    if (vault.bankAccount.workspace.tenantId !== user.tenantId) return { error: "Sem permissão." };
 
     if (Number(vault.balance) > 0) return { error: "O cofrinho precisa estar vazio para ser excluído. Resgate o valor primeiro." };
 
@@ -883,6 +945,20 @@ export async function upsertGoal(formData: FormData, id?: string, isShared = fal
                 const newGoal = await tx.goal.create({ data });
                 id = newGoal.id;
             } else {
+                // SEGURANÇA
+                const existingGoal = await tx.goal.findUnique({
+                    where: { id },
+                    include: { workspace: true }
+                });
+
+                // Se a meta é compartilhada, tenantId deve bater. Se é pessoal, workspace deve bater com acesso.
+                if (!existingGoal) throw new Error("Meta não encontrada.");
+
+                const isOwner = existingGoal.tenantId === user.tenantId ||
+                               (existingGoal.workspace && existingGoal.workspace.tenantId === user.tenantId);
+
+                if (!isOwner) throw new Error("Sem permissão para editar esta meta.");
+
                 await tx.goal.update({ where: { id }, data });
             }
 
@@ -933,7 +1009,16 @@ export async function upsertGoal(formData: FormData, id?: string, isShared = fal
 export async function deleteGoal(id: string) {
     const { user, error } = await validateUser('goals_delete');
     if (error || !user) return { error };
-    try { await prisma.goal.delete({ where: { id } }); } catch(e) { return { error: "Erro ao excluir meta." }; }
+    try {
+        // SEGURANÇA
+        const goal = await prisma.goal.findUnique({ where: { id }, include: { workspace: true } });
+        if (!goal) return { error: "Meta não encontrada" };
+
+        const isOwner = goal.tenantId === user.tenantId || (goal.workspace && goal.workspace.tenantId === user.tenantId);
+        if (!isOwner) return { error: "Sem permissão." };
+
+        await prisma.goal.delete({ where: { id } });
+    } catch(e) { return { error: "Erro ao excluir meta." }; }
     revalidatePath('/dashboard/goals');
     revalidatePath('/dashboard');
     return { success: true };
