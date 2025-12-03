@@ -16,6 +16,7 @@ function generateTransactionHash(date: Date, amount: number, description: string
 }
 
 // --- FUNÇÃO AUXILIAR: Recalcular saldo total da meta ---
+// tx type inferido ou Prisma.TransactionClient se importado
 async function recalculateGoalBalance(goalId: string, tx: any) {
     if (!goalId) return;
     
@@ -539,22 +540,45 @@ export async function deleteTransaction(id: string) {
   return { success: true };
 }
 
-export async function importTransactions(accountId: string, transactions: any[]) {
-    // Mantido igual (omitido para brevidade)
+const ImportTransactionSchema = z.object({
+    description: z.string(),
+    amount: z.coerce.number(),
+    date: z.string().or(z.date()),
+    externalId: z.string().optional(),
+    categoryId: z.string().optional()
+});
+
+export async function importTransactions(accountId: string, rawTransactions: any[]) {
     const { user, error } = await validateUser('transactions_create');
     if (error || !user) return { error };
+
     const account = await prisma.bankAccount.findUnique({ where: { id: accountId } });
     if (!account) return { error: "Conta não encontrada" };
 
     try {
-        const validTransactions = transactions.filter(t => t.date && !isNaN(Number(t.amount)) && t.description);
-        if (validTransactions.length === 0) return { error: "Nenhuma transação válida." };
+        // Validação com Zod
+        const validTransactions = rawTransactions
+            .filter(t => {
+                const result = ImportTransactionSchema.safeParse(t);
+                return result.success && !isNaN(Number(t.amount)) && t.description;
+            });
+
+        if (validTransactions.length === 0) return { error: "Nenhuma transação válida encontrada." };
 
         const txsToProcess = validTransactions.map(t => {
             const date = new Date(t.date);
             const absAmount = Math.abs(Number(t.amount));
             const importHash = t.externalId ? null : generateTransactionHash(date, absAmount, t.description);
-            return { ...t, date, absAmount, type: t.amount >= 0 ? 'INCOME' : 'EXPENSE', importHash };
+            return {
+                description: t.description,
+                amount: t.amount,
+                date,
+                externalId: t.externalId,
+                categoryId: t.categoryId,
+                absAmount,
+                type: Number(t.amount) >= 0 ? 'INCOME' : 'EXPENSE',
+                importHash
+            };
         });
 
         const hashes = txsToProcess.filter(t => t.importHash).map(t => t.importHash);

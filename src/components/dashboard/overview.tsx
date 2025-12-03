@@ -11,7 +11,7 @@ import { Progress } from "@/components/ui/progress";
 import { DepositGoalModal } from "@/components/dashboard/goals/deposit-goal-modal";
 import { formatCurrency } from "@/lib/utils";
 import { InfoHelp } from "@/components/dashboard/info-help";
-import { DateMonthSelector } from "@/components/dashboard/date-month-selector";
+import { DatePickerWithRange } from "@/components/ui/date-picker-with-range";
 
 interface DashboardData {
   totalBalance: number;
@@ -51,7 +51,7 @@ export function DashboardOverview({ data }: { data: DashboardData }) {
           <p className="text-muted-foreground">Dados em tempo real do <span className="text-emerald-500">Econoplan</span></p>
         </div>
         <div className="flex gap-2 items-center">
-           <DateMonthSelector keysToReset={['chart']} />
+           <DatePickerWithRange keysToReset={['chart']} />
            
            <span className="hidden md:flex px-3 py-1 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-500 text-xs items-center gap-1 h-8">
              <ShieldCheck className="w-3 h-3" /> Ambiente Seguro
@@ -112,7 +112,7 @@ export function DashboardOverview({ data }: { data: DashboardData }) {
         
         <Card className="lg:col-span-2 bg-card border-border shadow-sm">
           <div className="p-6 flex items-center gap-2">
-             <DateMonthSelector prefix="chart" isIconTrigger={true} />
+             <DatePickerWithRange prefix="chart" />
              
              <h3 className="font-semibold text-lg text-foreground">Fluxo de Caixa</h3>
              <InfoHelp title="Histórico Financeiro">

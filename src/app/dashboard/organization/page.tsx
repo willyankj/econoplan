@@ -9,7 +9,6 @@ import { DepositGoalModal } from "@/components/dashboard/goals/deposit-goal-moda
 import { checkPermission } from "@/lib/permissions";
 import { TenantOverviewCharts } from "@/components/dashboard/organization/tenant-overview-charts";
 import { TenantRecentTransactions } from "@/components/dashboard/organization/tenant-recent-transactions";
-import { DateMonthSelector } from "@/components/dashboard/date-month-selector";
 import { OrgFilters } from "@/components/dashboard/organization/org-filters";
 import { GoalAnalytics } from "@/components/dashboard/organization/goal-analytics"; 
 import { formatCurrency } from "@/lib/utils";

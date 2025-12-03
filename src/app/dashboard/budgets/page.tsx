@@ -3,7 +3,7 @@ import { BudgetModal } from "@/components/dashboard/budgets/budget-modal";
 import { BudgetCard } from "@/components/dashboard/budgets/budget-card";
 import { PieChart } from "lucide-react";
 import { getUserWorkspace } from "@/lib/get-user-workspace";
-import { DateMonthSelector } from "@/components/dashboard/date-month-selector"; // <--- 1. IMPORTAR
+import { DatePickerWithRange } from "@/components/ui/date-picker-with-range";
 
 export const dynamic = 'force-dynamic';
 
