@@ -37,6 +37,7 @@ export const addWeeks = (date: Date, amount: number) => addWeeksFns(date, amount
 export const addYears = (date: Date, amount: number) => addYearsFns(date, amount);
 
 export const differenceInMonths = (dateLeft: Date, dateRight: Date) => diffMonthsFns(dateLeft, dateRight);
+export const differenceInCalendarMonths = differenceInMonths; // Alias para compatibilidade
 export const isBefore = (date: Date, dateToCompare: Date) => isBeforeFns(date, dateToCompare);
 export const isSameMonth = (dateLeft: Date, dateRight: Date) => isSameMonthFns(dateLeft, dateRight);
 export const isSameDay = (dateLeft: Date, dateRight: Date) => isSameDayFns(dateLeft, dateRight);
