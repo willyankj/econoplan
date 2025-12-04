@@ -585,6 +585,10 @@ export async function deleteTransaction(id: string) {
             const vault = await tx.vault.findUnique({ where: { id: t.vaultId } });
             if(vault) {
                 if (t.type === 'VAULT_DEPOSIT') {
+                    // VERIFICAÇÃO DE SALDO: Impedir saldo negativo
+                    if (Number(vault.balance) < Number(t.amount)) {
+                        throw new Error(`Não é possível excluir este aporte pois o valor já foi utilizado. Saldo atual do cofrinho: R$ ${Number(vault.balance).toFixed(2)}`);
+                    }
                     await tx.vault.update({ where: { id: t.vaultId }, data: { balance: { decrement: t.amount } } });
                 } else if (t.type === 'VAULT_WITHDRAW') {
                     await tx.vault.update({ where: { id: t.vaultId }, data: { balance: { increment: t.amount } } });
