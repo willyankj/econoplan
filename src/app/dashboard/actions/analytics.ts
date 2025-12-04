@@ -100,15 +100,55 @@ export async function getDashboardOverviewData(params: { month?: string, from?: 
          const val = toDecimal(t.amount);
          if (t.type === 'INCOME') entry.income += val;
          else if (t.type === 'EXPENSE') entry.expense += val;
-         // Balance Calculation happens next
       }
     });
 
-    // Calcula o Saldo (Receita - Despesa) para cada entrada
-    // Nota: Estamos calculando o saldo DO PERÍODO (Dia/Mês), não acumulado.
-    chartMap.forEach(entry => {
-        entry.balance = entry.income - entry.expense;
-    });
+    // 3.1 CÁLCULO DE SALDO ACUMULADO (RUNNING BALANCE)
+    // 1. Pega saldo atual (Total Balance)
+    // 2. Desconta transações futuras (Entre o fim do gráfico e hoje) para chegar no saldo FINAL do gráfico.
+    // 3. Itera de trás para frente no gráfico para distribuir o saldo.
+
+    const today = new Date();
+    let endOfChartBalance = totalBalance;
+
+    // Se o gráfico termina no passado (antes de hoje), precisamos ajustar o saldo
+    if (globalDates.endDate < today) {
+        const gapTransactions = await prisma.transaction.findMany({
+            where: {
+                workspaceId,
+                date: { gt: globalDates.endDate, lte: today },
+                creditCardId: null // Apenas saldo de contas
+            },
+            select: { amount: true, type: true }
+        });
+
+        const gapNet = gapTransactions.reduce((acc, t) => {
+            const val = toDecimal(t.amount);
+            if (t.type === 'INCOME') return acc + val;
+            if (t.type === 'EXPENSE') return acc - val;
+            return acc;
+        }, 0);
+
+        // Saldo Final do Gráfico = Saldo Atual - (Receita Gap - Despesa Gap)
+        endOfChartBalance = totalBalance - gapNet;
+    }
+
+    // Converter Map para Array ordenado para iteração
+    const chartArray = Array.from(chartMap.values());
+    let runningBalance = endOfChartBalance;
+
+    // Iterar de trás para frente
+    for (let i = chartArray.length - 1; i >= 0; i--) {
+        const entry = chartArray[i];
+
+        // O saldo plotado no ponto "i" é o saldo ao FINAL daquele dia/mês.
+        entry.balance = runningBalance;
+
+        // Para a próxima iteração (dia anterior), removemos o efeito do dia atual.
+        // Saldo(Ontem) = Saldo(Hoje) - Receita(Hoje) + Despesa(Hoje)
+        const netChange = entry.income - entry.expense;
+        runningBalance = runningBalance - netChange;
+    }
 
     // 4. ORÇAMENTOS
     const budgets = await prisma.budget.findMany({ where: { workspaceId }, include: { category: true } });
@@ -135,7 +175,7 @@ export async function getDashboardOverviewData(params: { month?: string, from?: 
       totalBalance,
       monthlyIncome: toDecimal(incomeAgg._sum.amount),
       monthlyExpense: toDecimal(expenseAgg._sum.amount),
-      chartData: Array.from(chartMap.values()),
+      chartData: chartArray,
       lastTransactions: [],
       budgets: budgetList,
       goals,
