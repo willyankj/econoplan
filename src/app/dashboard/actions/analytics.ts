@@ -2,13 +2,181 @@
 
 import { prisma } from "@/lib/prisma";
 import { validateUser, getActiveWorkspaceId } from "@/lib/action-utils";
-import { addMonths, startOfMonth, endOfMonth, format, subMonths, differenceInCalendarMonths, isBefore, addWeeks, addYears, isSameMonth } from "date-fns";
+import {
+    format, subMonths,
+    differenceInCalendarMonths, isBefore, addMonths, addWeeks, addYears,
+    formatMonthYear, formatMonthShort, getMonthKey
+} from "@/lib/date-utils";
+import { startOfMonth, endOfMonth } from "date-fns";
 import { ptBR } from "date-fns/locale";
-
-const toDecimal = (num: any) => Number(num) || 0;
+import { toDecimal, TRANSACTION_TYPES } from "@/lib/finance-utils";
 
 // ============================================================================
-// 1. ORÁCULO FINANCEIRO
+// HELPERS
+// ============================================================================
+function getDatesFromParams(from?: string, to?: string, month?: string) {
+    const now = new Date();
+    let startDate: Date;
+    let endDate: Date;
+
+    if (from && to) {
+      startDate = new Date(from + "T00:00:00");
+      endDate = new Date(to + "T23:59:59");
+    } else {
+      let dateRef = now;
+      if (month) {
+        const [y, m] = month.split('-');
+        dateRef = new Date(parseInt(y), parseInt(m) - 1, 1);
+      }
+      startDate = startOfMonth(dateRef);
+      endDate = endOfMonth(dateRef);
+    }
+    return { startDate, endDate };
+}
+
+// ============================================================================
+// 1. DASHBOARD OVERVIEW (VISÃO GERAL DO USUÁRIO)
+// ============================================================================
+export async function getDashboardOverviewData(params: { month?: string, from?: string, to?: string }) {
+    const { user } = await validateUser();
+    if (!user) throw new Error("Unauthorized");
+    const workspaceId = await getActiveWorkspaceId(user);
+
+    const globalDates = getDatesFromParams(params.from, params.to, params.month);
+
+    // 1. SALDO TOTAL (Considerando todas as contas do workspace)
+    const rawAccounts = await prisma.bankAccount.findMany({ where: { workspaceId }, orderBy: { name: 'asc' } });
+    const accounts = rawAccounts.map(acc => ({ ...acc, balance: Number(acc.balance) }));
+    const totalBalance = accounts.reduce((acc, a) => acc + a.balance, 0);
+
+    // 2. TOTAIS MENSAIS (Agregação no período selecionado)
+    const incomeAgg = await prisma.transaction.aggregate({
+        _sum: { amount: true },
+        where: { workspaceId, type: 'INCOME', creditCardId: null, date: { gte: globalDates.startDate, lte: globalDates.endDate } }
+    });
+    const expenseAgg = await prisma.transaction.aggregate({
+        _sum: { amount: true },
+        where: { workspaceId, type: 'EXPENSE', creditCardId: null, date: { gte: globalDates.startDate, lte: globalDates.endDate } }
+    });
+
+    // 3. DADOS DO GRÁFICO (Com Saldo Dia/Mês)
+    const chartTransactions = await prisma.transaction.findMany({
+        where: { workspaceId, creditCardId: null, date: { gte: globalDates.startDate, lte: globalDates.endDate } },
+        select: { date: true, amount: true, type: true, bankAccountId: true, recipientAccountId: true },
+        orderBy: { date: 'asc' }
+    });
+
+    const diffDays = Math.ceil(Math.abs(globalDates.endDate.getTime() - globalDates.startDate.getTime()) / (1000 * 60 * 60 * 24));
+    const isDailyChart = diffDays <= 35;
+    const chartMap = new Map();
+
+    // Set auxiliar para verificar contas internas do workspace (para cálculo de transferência)
+    const workspaceAccountIds = new Set(rawAccounts.map(a => a.id));
+
+    // Inicializa o mapa com datas zeradas e propriedades auxiliares
+    if (isDailyChart) {
+        for (let d = new Date(globalDates.startDate); d <= globalDates.endDate; d.setDate(d.getDate() + 1)) {
+            const key = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+            chartMap.set(key, { name: key, income: 0, expense: 0, balance: 0, netChange: 0 });
+        }
+    } else {
+        let d = new Date(globalDates.startDate);
+        while (d <= globalDates.endDate) {
+            const monthKey = d.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '');
+            const formattedKey = monthKey.charAt(0).toUpperCase() + monthKey.slice(1);
+            if (!chartMap.has(formattedKey)) chartMap.set(formattedKey, { name: formattedKey, income: 0, expense: 0, balance: 0, netChange: 0 });
+            d.setMonth(d.getMonth() + 1); d.setDate(1);
+        }
+    }
+
+    // Preenche com transações
+    chartTransactions.forEach(t => {
+      let key = '';
+      if (isDailyChart) key = t.date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+      else {
+          const m = t.date.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '');
+          key = m.charAt(0).toUpperCase() + m.slice(1);
+      }
+
+      if (chartMap.has(key)) {
+         const entry = chartMap.get(key);
+         const val = toDecimal(t.amount);
+
+         // Lógica Visual (Barras): Apenas Income/Expense Operacional
+         if (t.type === 'INCOME') entry.income += val;
+         else if (t.type === 'EXPENSE') entry.expense += val;
+
+         // Lógica de Saldo (Linha): Considera TUDO que afeta o saldo bancário
+         if (t.type === 'INCOME') {
+             entry.netChange += val;
+         } else if (t.type === 'EXPENSE') {
+             entry.netChange -= val;
+         } else if (t.type === 'VAULT_DEPOSIT') {
+             // Sai da conta (visível) para cofrinho (invisível no totalBalance de contas)
+             entry.netChange -= val;
+         } else if (t.type === 'VAULT_WITHDRAW') {
+             // Entra na conta vindo do cofrinho
+             entry.netChange += val;
+         } else if (t.type === 'TRANSFER') {
+             // Sai da conta de origem (t.bankAccountId)
+             entry.netChange -= val;
+
+             // Se destino for conta do workspace, entra na conta de destino (+val) -> Net 0
+             if (t.recipientAccountId && workspaceAccountIds.has(t.recipientAccountId)) {
+                 entry.netChange += val;
+             }
+         }
+      }
+    });
+
+    // 3.1 CÁLCULO DE FLUXO DE CAIXA ACUMULADO (FORWARD)
+    // Solicitação do usuário: "Receita - Despesa no primeiro dia, nos próximos, saldo remanescente + receita - despesa"
+    // Isso ignora o saldo inicial da conta bancária e foca puramente no fluxo acumulado do período.
+
+    const chartArray = Array.from(chartMap.values());
+    let runningBalance = 0;
+
+    for (let i = 0; i < chartArray.length; i++) {
+        const entry = chartArray[i];
+        runningBalance += entry.netChange;
+        entry.balance = runningBalance;
+    }
+
+    // 4. ORÇAMENTOS
+    const budgets = await prisma.budget.findMany({ where: { workspaceId }, include: { category: true } });
+
+    const expensesByCategory = await prisma.transaction.groupBy({
+        by: ['categoryId'],
+        _sum: { amount: true },
+        where: { workspaceId, type: 'EXPENSE', categoryId: { not: null }, date: { gte: globalDates.startDate, lte: globalDates.endDate } }
+    });
+
+    const expMap = new Map();
+    expensesByCategory.forEach(e => { if(e.categoryId) expMap.set(e.categoryId, toDecimal(e._sum.amount)); });
+
+    const budgetList = budgets.map(b => ({
+        id: b.id, categoryName: b.category?.name || 'Geral', target: Number(b.targetAmount),
+        spent: expMap.get(b.categoryId) || 0
+    }));
+
+    // 5. METAS
+    const rawGoals = await prisma.goal.findMany({ where: { workspaceId }, orderBy: [{ deadline: 'asc' }, { createdAt: 'desc' }], take: 3 });
+    const goals = rawGoals.map(g => ({ ...g, targetAmount: Number(g.targetAmount), currentAmount: Number(g.currentAmount) }));
+
+    return {
+      totalBalance,
+      monthlyIncome: toDecimal(incomeAgg._sum.amount),
+      monthlyExpense: toDecimal(expenseAgg._sum.amount),
+      chartData: chartArray,
+      lastTransactions: [],
+      budgets: budgetList,
+      goals,
+      accounts
+    };
+}
+
+// ============================================================================
+// 2. ORÁCULO FINANCEIRO (FLUXO DE CAIXA PROJETADO)
 // ============================================================================
 export async function getTenantOracleData(filterWorkspaceId?: string, dateRange?: { from: Date, to: Date }) {
   const { user } = await validateUser('org_view');
@@ -27,11 +195,13 @@ export async function getTenantOracleData(filterWorkspaceId?: string, dateRange?
     ? { id: filterWorkspaceId, tenantId: user.tenantId }
     : { tenantId: user.tenantId };
 
+  // 1. Saldo Inicial (Todas as Contas)
   const accounts = await prisma.bankAccount.findMany({
     where: { workspace: workspaceFilter }
   });
   let currentBalance = accounts.reduce((acc, cur) => acc + toDecimal(cur.balance), 0);
 
+  // 2. Transações Futuras (Reais, já lançadas)
   const futureTransactions = await prisma.transaction.findMany({
     where: {
       workspace: workspaceFilter,
@@ -39,6 +209,7 @@ export async function getTenantOracleData(filterWorkspaceId?: string, dateRange?
     }
   });
 
+  // 3. Definições de Recorrência
   const recurringDefs = await prisma.transaction.findMany({
     where: {
       workspace: workspaceFilter,
@@ -47,20 +218,32 @@ export async function getTenantOracleData(filterWorkspaceId?: string, dateRange?
     }
   });
 
+  // Mapa de Projeção (Income/Expense previstos via recorrência)
   const projectionMap = new Map<string, { income: number, expense: number }>();
 
   recurringDefs.forEach(def => {
       let pointer = new Date(def.nextRecurringDate!);
       
       while (pointer <= projectUntil) {
-          const key = format(pointer, 'yyyy-MM');
+          const key = getMonthKey(pointer);
           
           if (!projectionMap.has(key)) projectionMap.set(key, { income: 0, expense: 0 });
           const entry = projectionMap.get(key)!;
 
-          if (def.type === 'INCOME') entry.income += toDecimal(def.amount);
-          else entry.expense += toDecimal(def.amount);
+          // Lógica de Projeção:
+          // INCOME -> Soma em Income
+          // EXPENSE -> Soma em Expense
+          // VAULT_DEPOSIT -> Soma em Expense (sai do caixa operacional)
+          // VAULT_WITHDRAW -> Soma em Income (entra no caixa operacional)
+          // TRANSFER -> Ignora (neutro globalmente)
 
+          if (def.type === 'INCOME' || def.type === 'VAULT_WITHDRAW') {
+              entry.income += toDecimal(def.amount);
+          } else if (def.type === 'EXPENSE' || def.type === 'VAULT_DEPOSIT') {
+              entry.expense += toDecimal(def.amount);
+          }
+
+          // Avança pointer
           if (def.frequency === 'WEEKLY') pointer = addWeeks(pointer, 1);
           else if (def.frequency === 'YEARLY') pointer = addYears(pointer, 1);
           else pointer = addMonths(pointer, 1);
@@ -74,19 +257,30 @@ export async function getTenantOracleData(filterWorkspaceId?: string, dateRange?
     const currentDate = addMonths(today, i);
     const monthStart = startOfMonth(currentDate);
     const monthEnd = endOfMonth(currentDate);
-    const monthLabel = format(currentDate, 'MMM', { locale: ptBR }).toUpperCase();
-    const monthKey = format(currentDate, 'yyyy-MM');
+    const monthLabel = formatMonthShort(currentDate);
+    const monthKey = getMonthKey(currentDate);
 
+    // Transações REAIS (lançadas no futuro)
     const monthRealTx = futureTransactions.filter(t => t.date >= monthStart && t.date <= monthEnd);
-    const incomeReal = monthRealTx.filter(t => t.type === 'INCOME').reduce((sum, t) => sum + toDecimal(t.amount), 0);
-    const expenseReal = monthRealTx.filter(t => t.type === 'EXPENSE').reduce((sum, t) => sum + toDecimal(t.amount), 0);
 
+    // Filtra e Soma Reais
+    const incomeReal = monthRealTx
+        .filter(t => t.type === 'INCOME' || t.type === 'VAULT_WITHDRAW')
+        .reduce((sum, t) => sum + toDecimal(t.amount), 0);
+
+    const expenseReal = monthRealTx
+        .filter(t => t.type === 'EXPENSE' || t.type === 'VAULT_DEPOSIT')
+        .reduce((sum, t) => sum + toDecimal(t.amount), 0);
+
+    // Dados Projetados (Recorrência)
     const projected = projectionMap.get(monthKey) || { income: 0, expense: 0 };
 
+    // Totalização
     const totalIncome = incomeReal + projected.income;
     const totalExpense = expenseReal + projected.expense;
     const netChange = totalIncome - totalExpense;
     
+    // Atualiza saldo acumulado
     runningBalance += netChange;
 
     timeline.push({
@@ -108,7 +302,7 @@ export async function getTenantOracleData(filterWorkspaceId?: string, dateRange?
 }
 
 // ============================================================================
-// 2. RAIO-X DE ENDIVIDAMENTO
+// 3. RAIO-X DE ENDIVIDAMENTO
 // ============================================================================
 export async function getTenantDebtXRayData(filterWorkspaceId?: string) {
     const { user } = await validateUser('org_view');
@@ -137,7 +331,7 @@ export async function getTenantDebtXRayData(filterWorkspaceId?: string) {
   
     for (let i = 0; i < 12; i++) {
         const d = addMonths(today, i);
-        const key = format(d, 'MMM/yy', { locale: ptBR }).toUpperCase();
+        const key = formatMonthYear(d); // Ex: JAN/24
         monthsMap.set(key, { name: key, total: 0 }); 
     }
   
@@ -148,6 +342,7 @@ export async function getTenantDebtXRayData(filterWorkspaceId?: string) {
         const closingDay = t.creditCard.closingDay;
         const dueDay = t.creditCard.dueDay;
   
+        // Lógica simplificada de vencimento
         let referenceClosingDate = new Date(txDate.getFullYear(), txDate.getMonth(), closingDay);
         if (txDate.getDate() >= closingDay) {
             referenceClosingDate = addMonths(referenceClosingDate, 1);
@@ -158,7 +353,7 @@ export async function getTenantDebtXRayData(filterWorkspaceId?: string) {
             dueDate = addMonths(dueDate, 1);
         }
   
-        const key = format(dueDate, 'MMM/yy', { locale: ptBR }).toUpperCase();
+        const key = formatMonthYear(dueDate);
         const cardName = t.creditCard.name;
         cardSet.add(cardName);
   
@@ -176,7 +371,7 @@ export async function getTenantDebtXRayData(filterWorkspaceId?: string) {
 }
   
 // ============================================================================
-// 3. COMPARATIVO MÊS A MÊS
+// 4. COMPARATIVO MÊS A MÊS
 // ============================================================================
 export async function getWorkspaceCategoryComparison() {
     const { user } = await validateUser();
@@ -193,7 +388,7 @@ export async function getWorkspaceCategoryComparison() {
     const transactions = await prisma.transaction.findMany({
         where: {
             workspaceId,
-            type: 'EXPENSE',
+            type: 'EXPENSE', // Apenas despesas reais para comparação
             date: { gte: pastStart, lte: currentEnd },
             categoryId: { not: null }
         },
@@ -238,14 +433,14 @@ export async function getWorkspaceCategoryComparison() {
 }
   
 // ============================================================================
-// 4. ÍNDICE DE SAÚDE FINANCEIRA
+// 5. ÍNDICE DE SAÚDE FINANCEIRA
 // ============================================================================
 export async function getTenantHealthScore(filterWorkspaceId?: string) {
     const { user } = await validateUser('org_view');
     if (!user) return { score: 0, metrics: {} };
 
     const today = new Date();
-    const start = subMonths(today, 1);
+    const start = subMonths(today, 1); // Analisa últimos 30 dias (aprox)
 
     const workspaceFilter = filterWorkspaceId 
     ? { id: filterWorkspaceId, tenantId: user.tenantId }
@@ -262,20 +457,48 @@ export async function getTenantHealthScore(filterWorkspaceId?: string) {
         where: { workspace: workspaceFilter }
     });
 
-    const totalIncome = transactions.filter(t => t.type === 'INCOME').reduce((acc, t) => acc + toDecimal(t.amount), 0);
-    const totalExpense = transactions.filter(t => t.type === 'EXPENSE').reduce((acc, t) => acc + toDecimal(t.amount), 0);
+    // --- CORREÇÃO DE CONCEITO ---
+    // Income: Receita Operacional (Salário, Vendas)
+    // Expense: Despesa Operacional (Contas, Compras)
+    // Investment: Aportes em Cofrinhos (Poupança)
+    // Ignore: Transferências internas
+
+    const totalIncome = transactions
+        .filter(t => t.type === TRANSACTION_TYPES.INCOME)
+        .reduce((acc, t) => acc + toDecimal(t.amount), 0);
+
+    const totalExpense = transactions
+        .filter(t => t.type === TRANSACTION_TYPES.EXPENSE)
+        .reduce((acc, t) => acc + toDecimal(t.amount), 0);
+
+    const totalSavings = transactions
+        .filter(t => t.type === TRANSACTION_TYPES.VAULT_DEPOSIT)
+        .reduce((acc, t) => acc + toDecimal(t.amount), 0);
+
     const totalBalance = accounts.reduce((acc, a) => acc + toDecimal(a.balance), 0);
 
+    // Savings Rate = (Receita - Despesa) / Receita.
+    // Se houve aporte, o dinheiro "sobrou" da despesa, então a conta (Income - Expense) já inclui o que foi poupado?
+    // Ex: Ganhei 100. Gastei 60. Sobrou 40. Desses 40, botei 30 no cofrinho.
+    // Income=100, Expense=60. (Net=40). SavingsRate = 40%.
+    // O aporte de 30 é apenas uma alocação do Net.
+    // Portanto, NÃO devemos somar o Aporte como Despesa. E a fórmula (Inc-Exp)/Inc está correta.
+    // O Aporte serve para validar se o usuário está REALMENTE poupando, mas matematicamente a taxa de poupança potencial é Inc - Exp.
+
     const savingsRate = totalIncome > 0 ? ((totalIncome - totalExpense) / totalIncome) * 100 : 0;
+
     let savingsScore = 0;
     if (savingsRate >= 20) savingsScore = 40;
     else if (savingsRate > 0) savingsScore = savingsRate * 2;
     else savingsScore = 0;
 
+    // Se o usuário fez aportes explícitos, damos um bônus se a savingsRate calculada não for alta o suficiente?
+    // Por enquanto manteremos a lógica simples: Receita - Despesa = Capacidade de Poupança.
+
     const monthlyAvgExpense = totalExpense || 1; 
     const coverageMonths = totalBalance / monthlyAvgExpense;
     let coverageScore = 0;
-    if (coverageMonths >= 3) coverageScore = 40;
+    if (coverageMonths >= 3) coverageScore = 40; // 3 meses de reserva de emergência
     else coverageScore = (coverageMonths / 3) * 40;
 
     let budgetScore = 20;
@@ -294,7 +517,7 @@ export async function getTenantHealthScore(filterWorkspaceId?: string) {
 }
 
 // ============================================================================
-// 5. ANALYTICS GERAL DO TENANT (CORREÇÃO: Adicionada função que faltava)
+// 6. ANALYTICS GERAL DO TENANT
 // ============================================================================
 export async function getTenantAnalytics(period: string, type?: string, workspaceId?: string) {
     const { user } = await validateUser('org_view');
@@ -314,7 +537,6 @@ export async function getTenantAnalytics(period: string, type?: string, workspac
         startDate = new Date(2000, 0, 1);
     }
 
-    // Filtros
     const where: any = {
         workspace: { tenantId: user.tenantId },
         date: { gte: startDate, lte: endDate }
@@ -342,7 +564,6 @@ export async function getTenantAnalytics(period: string, type?: string, workspac
         }
     });
 
-    // Processamento
     const chartDataMap = new Map();
     let totalIncome = 0;
     let totalExpense = 0;
@@ -350,24 +571,30 @@ export async function getTenantAnalytics(period: string, type?: string, workspac
     let totalInvestment = 0;
 
     data.forEach(t => {
-        // Agregação para o gráfico
         const day = format(t.date, 'dd/MM');
+
         if (!chartDataMap.has(day)) {
             chartDataMap.set(day, { name: day, income: 0, expense: 0, transfer: 0, investment: 0 });
         }
         const entry = chartDataMap.get(day);
         const val = Number(t.amount);
 
-        if (t.type === 'INCOME') entry.income += val;
-        else if (t.type === 'EXPENSE') entry.expense += val;
-        else if (t.type === 'TRANSFER') entry.transfer += val;
-        else if (t.type === 'VAULT_DEPOSIT' || t.type === 'VAULT_WITHDRAW') entry.investment += val;
-
-        // Totais Gerais
-        if (t.type === 'INCOME') totalIncome += val;
-        else if (t.type === 'EXPENSE') totalExpense += val;
-        else if (t.type === 'TRANSFER') totalTransfer += val;
-        else if (t.type.startsWith('VAULT')) totalInvestment += val;
+        // Agregação Correta por Tipo
+        if (t.type === TRANSACTION_TYPES.INCOME) {
+            entry.income += val;
+            totalIncome += val;
+        } else if (t.type === TRANSACTION_TYPES.EXPENSE) {
+            entry.expense += val;
+            totalExpense += val;
+        } else if (t.type === TRANSACTION_TYPES.TRANSFER) {
+            entry.transfer += val;
+            totalTransfer += val;
+        } else if (t.type === TRANSACTION_TYPES.VAULT_DEPOSIT || t.type === TRANSACTION_TYPES.VAULT_WITHDRAW) {
+            // Investment: Consideramos o volume movimentado (valor absoluto) ou apenas aportes?
+            // Geralmente em gráficos de barras queremos ver o VOLUME.
+            entry.investment += val;
+            totalInvestment += val;
+        }
     });
 
     return {

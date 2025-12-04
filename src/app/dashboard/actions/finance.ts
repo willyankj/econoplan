@@ -16,6 +16,7 @@ function generateTransactionHash(date: Date, amount: number, description: string
 }
 
 // --- FUNÇÃO AUXILIAR: Recalcular saldo total da meta ---
+// tx type inferido ou Prisma.TransactionClient se importado
 async function recalculateGoalBalance(goalId: string, tx: any) {
     if (!goalId) return;
     
@@ -71,6 +72,23 @@ const PayInvoiceSchema = z.object({
   date: z.string(),
 });
 
+// --- SCHEMAS PARA COFRINHOS E MOVIMENTAÇÃO ---
+const VaultSchema = z.object({
+    name: z.string().min(1, "Nome obrigatório"),
+    bankAccountId: z.string().uuid("Conta bancária inválida"),
+    targetAmount: z.coerce.number().optional().nullable(),
+    balance: z.coerce.number().optional(), 
+    goalId: z.string().uuid().optional().nullable(),
+});
+
+const TransferVaultSchema = z.object({
+    sourceId: z.string().min(1, "Origem obrigatória"),
+    destinationId: z.string().min(1, "Destino obrigatório"),
+    amount: z.coerce.number().positive("Valor inválido"),
+    transferType: z.enum(['A_TO_V', 'V_TO_A', 'V_TO_V']),
+});
+
+
 // --- ACTIONS DE CONTAS ---
 
 export async function upsertAccount(formData: FormData, id?: string) {
@@ -84,6 +102,16 @@ export async function upsertAccount(formData: FormData, id?: string) {
 
   try {
     if (id) {
+      // SEGURANÇA: Verificar se a conta pertence ao tenant
+      const existing = await prisma.bankAccount.findUnique({
+          where: { id },
+          include: { workspace: true }
+      });
+
+      if (!existing || existing.workspace.tenantId !== user.tenantId) {
+          return { error: "Conta não encontrada ou sem permissão." };
+      }
+
       await prisma.bankAccount.update({ where: { id }, data });
       await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'UPDATE', entity: 'Account', entityId: id, details: `Editou conta ${data.name}` });
     } else {
@@ -102,7 +130,16 @@ export async function deleteAccount(id: string) {
   const { user, error } = await validateUser('accounts_delete');
   if (error || !user) return { error };
   try {
-    const acc = await prisma.bankAccount.findUnique({ where: { id } });
+    // SEGURANÇA: Verificar propriedade
+    const acc = await prisma.bankAccount.findUnique({
+        where: { id },
+        include: { workspace: true }
+    });
+
+    if (!acc || acc.workspace.tenantId !== user.tenantId) {
+        return { error: "Conta não encontrada ou sem permissão." };
+    }
+
     await prisma.bankAccount.delete({ where: { id } });
     await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'DELETE', entity: 'Account', details: `Apagou conta ${acc?.name}` });
   } catch (e) { return { error: "Erro ao excluir." }; }
@@ -147,6 +184,16 @@ export async function upsertCard(formData: FormData, id?: string) {
 
   try {
     if (id) {
+      // SEGURANÇA: Verificar propriedade
+      const existing = await prisma.creditCard.findUnique({
+          where: { id },
+          include: { workspace: true }
+      });
+
+      if (!existing || existing.workspace.tenantId !== user.tenantId) {
+          return { error: "Cartão não encontrado ou sem permissão." };
+      }
+
       await prisma.creditCard.update({ where: { id }, data });
       await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'UPDATE', entity: 'Card', entityId: id, details: `Atualizou cartão ${data.name}` });
     } else {
@@ -166,7 +213,16 @@ export async function deleteCreditCard(id: string) {
   const { user, error } = await validateUser('cards_delete');
   if (error || !user) return { error };
   try {
-    const card = await prisma.creditCard.findUnique({ where: { id } });
+    // SEGURANÇA: Verificar propriedade
+    const card = await prisma.creditCard.findUnique({
+        where: { id },
+        include: { workspace: true }
+    });
+
+    if (!card || card.workspace.tenantId !== user.tenantId) {
+        return { error: "Cartão não encontrado ou sem permissão." };
+    }
+
     await prisma.creditCard.delete({ where: { id } });
     await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'DELETE', entity: 'Card', details: `Apagou cartão ${card?.name}` });
   } catch (e) { return { error: "Erro ao excluir." }; }
@@ -232,8 +288,16 @@ export async function upsertTransaction(formData: FormData, id?: string) {
   let workspaceId = "";
 
   if (id) {
-      const oldT = await prisma.transaction.findUnique({ where: { id } });
-      if (!oldT) return { error: "Transação não encontrada" };
+      const oldT = await prisma.transaction.findUnique({
+          where: { id },
+          include: { workspace: true }
+      });
+
+      // SEGURANÇA: Verificar tenantId
+      if (!oldT || oldT.workspace.tenantId !== user.tenantId) {
+          return { error: "Transação não encontrada ou sem permissão." };
+      }
+
       workspaceId = oldT.workspaceId;
   } else {
       workspaceId = await getActiveWorkspaceId(user);
@@ -269,7 +333,8 @@ export async function upsertTransaction(formData: FormData, id?: string) {
                 await recalculateGoalBalance(updatedVault.goalId, tx);
             }
 
-            const catType = isDeposit ? 'EXPENSE' : 'INCOME';
+            // CORREÇÃO: Usar o tipo real (VAULT_DEPOSIT ou VAULT_WITHDRAW) na categoria
+            const catType = type;
             const category = await tx.category.upsert({
                 where: { workspaceId_name_type: { workspaceId: vault.bankAccount.workspaceId, name: "Metas", type: catType } },
                 update: {},
@@ -366,14 +431,36 @@ export async function upsertTransaction(formData: FormData, id?: string) {
               const oldT = await tx.transaction.findUnique({ where: { id } });
               if (!oldT) throw new Error("Transação original não encontrada");
 
+              // TRAVA DE SEGURANÇA: Bloquear edição de valor/tipo em Transferências e Aportes
+              // Motivo: A lógica de reversão de saldo para múltiplas contas (ou conta+cofrinho) é complexa e propensa a erros
+              // se feita via edição simples. É mais seguro forçar a recriação.
+              const isComplexTransaction =
+                  oldT.type === 'TRANSFER' ||
+                  oldT.type === 'VAULT_DEPOSIT' ||
+                  oldT.type === 'VAULT_WITHDRAW' ||
+                  oldT.recipientAccountId ||
+                  oldT.vaultId;
+
+              if (isComplexTransaction) {
+                  // Se tentar mudar o valor ou o tipo...
+                  if (amount !== Number(oldT.amount) || type !== oldT.type) {
+                       throw new Error("Para alterar o valor ou tipo de Transferências ou Investimentos, por favor exclua a transação e crie novamente para garantir a integridade dos saldos.");
+                  }
+                  // Permitir apenas alteração de data, descrição e categoria (se não afetar lógica financeira)
+              }
+
               await tx.transaction.update({ 
                   where: { id }, 
-                  data: { description, amount, date: baseDate, categoryId: catId } 
+                  data: { description, date: baseDate, categoryId: catId }
               });
 
-              if (oldT.isPaid && oldT.bankAccountId && oldT.type !== 'TRANSFER') {
+              // Atualização de saldo APENAS para Income/Expense simples
+              if (!isComplexTransaction && oldT.isPaid && oldT.bankAccountId) {
                   const diff = amount - Number(oldT.amount);
                   if (diff !== 0) {
+                      // Atualiza a transação com o novo valor também (pois não foi bloqueado acima)
+                      await tx.transaction.update({ where: { id }, data: { amount } });
+
                       if (oldT.type === 'INCOME') {
                           await tx.bankAccount.update({ where: { id: oldT.bankAccountId }, data: { balance: { increment: diff } } });
                       } else if (oldT.type === 'EXPENSE') {
@@ -383,7 +470,7 @@ export async function upsertTransaction(formData: FormData, id?: string) {
               }
           });
           return { success: true };
-      } catch (e) { return { error: "Erro ao atualizar transação." }; }
+      } catch (e: any) { return { error: e.message || "Erro ao atualizar transação." }; }
   }
 
   const isInstallment = recurrence === 'INSTALLMENT' && (installments || 0) > 1;
@@ -464,8 +551,15 @@ export async function deleteTransaction(id: string) {
   const { user, error } = await validateUser('transactions_delete');
   if (error || !user) return { error };
 
-  const t = await prisma.transaction.findUnique({ where: { id }, include: { vault: true } }); 
-  if (!t) return { error: "Não encontrado" };
+  // SEGURANÇA: Include workspace para checar tenant
+  const t = await prisma.transaction.findUnique({
+      where: { id },
+      include: { vault: true, workspace: true }
+  });
+
+  if (!t || t.workspace.tenantId !== user.tenantId) {
+      return { error: "Não encontrado ou sem permissão." };
+  }
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -516,22 +610,45 @@ export async function deleteTransaction(id: string) {
   return { success: true };
 }
 
-export async function importTransactions(accountId: string, transactions: any[]) {
-    // Mantido igual (omitido para brevidade)
+const ImportTransactionSchema = z.object({
+    description: z.string(),
+    amount: z.coerce.number(),
+    date: z.string().or(z.date()),
+    externalId: z.string().optional(),
+    categoryId: z.string().optional()
+});
+
+export async function importTransactions(accountId: string, rawTransactions: any[]) {
     const { user, error } = await validateUser('transactions_create');
     if (error || !user) return { error };
+
     const account = await prisma.bankAccount.findUnique({ where: { id: accountId } });
     if (!account) return { error: "Conta não encontrada" };
 
     try {
-        const validTransactions = transactions.filter(t => t.date && !isNaN(Number(t.amount)) && t.description);
-        if (validTransactions.length === 0) return { error: "Nenhuma transação válida." };
+        // Validação com Zod
+        const validTransactions = rawTransactions
+            .filter(t => {
+                const result = ImportTransactionSchema.safeParse(t);
+                return result.success && !isNaN(Number(t.amount)) && t.description;
+            });
+
+        if (validTransactions.length === 0) return { error: "Nenhuma transação válida encontrada." };
 
         const txsToProcess = validTransactions.map(t => {
             const date = new Date(t.date);
             const absAmount = Math.abs(Number(t.amount));
             const importHash = t.externalId ? null : generateTransactionHash(date, absAmount, t.description);
-            return { ...t, date, absAmount, type: t.amount >= 0 ? 'INCOME' : 'EXPENSE', importHash };
+            return {
+                description: t.description,
+                amount: t.amount,
+                date,
+                externalId: t.externalId,
+                categoryId: t.categoryId,
+                absAmount,
+                type: Number(t.amount) >= 0 ? 'INCOME' : 'EXPENSE',
+                importHash
+            };
         });
 
         const hashes = txsToProcess.filter(t => t.importHash).map(t => t.importHash);
@@ -639,135 +756,6 @@ export async function getUpcomingBills() {
 // --- MÓDULO DE COFRINHOS E METAS (ATUALIZADO) ---
 // --------------------------------------------------------
 
-const VaultSchema = z.object({
-  name: z.string().min(1, "Nome do cofrinho é obrigatório"),
-  bankAccountId: z.string().uuid("Conta bancária inválida"),
-  targetAmount: z.coerce.number().optional(),
-  initialBalance: z.coerce.number().optional(),
-  goalId: z.string().optional(),
-});
-
-export async function upsertVault(formData: FormData, id?: string) {
-  const { user, error } = await validateUser();
-  if (error || !user) return { error };
-
-  const parsed = VaultSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return { error: "Dados inválidos" };
-  const { name, bankAccountId, targetAmount, goalId, initialBalance } = parsed.data;
-
-  try {
-    await prisma.$transaction(async (tx) => {
-        if (id) {
-            await tx.vault.update({ where: { id }, data: { name, targetAmount } });
-        } else {
-            // CORREÇÃO: Usando initialBalance
-            const vault = await tx.vault.create({ 
-                data: { name, bankAccountId, targetAmount, goalId, balance: initialBalance || 0 } 
-            });
-            
-            if (goalId) await recalculateGoalBalance(goalId, tx);
-            
-            await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'CREATE', entity: 'Vault', entityId: vault.id, details: `Criou cofrinho ${name}` });
-        }
-    });
-  } catch (e: any) { return { error: e.message || "Erro ao salvar cofrinho." }; }
-
-  revalidatePath('/dashboard');
-  revalidatePath(`/dashboard/accounts`);
-  return { success: true };
-}
-
-export async function deleteVault(id: string) {
-    const { user, error } = await validateUser();
-    if (error || !user) return { error };
-
-    const vault = await prisma.vault.findUnique({ where: { id } });
-    if (!vault) return { error: "Cofrinho não encontrado" };
-
-    if (Number(vault.balance) > 0) return { error: "O cofrinho precisa estar vazio para ser excluído. Resgate o valor primeiro." };
-
-    try {
-        await prisma.$transaction(async (tx) => {
-            await tx.vault.delete({ where: { id } });
-            if (vault.goalId) await recalculateGoalBalance(vault.goalId, tx);
-        });
-        await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'DELETE', entity: 'Vault', details: `Excluiu cofrinho ${vault.name}` });
-    } catch (e) { return { error: "Erro ao excluir." }; }
-
-    revalidatePath('/dashboard');
-    return { success: true };
-}
-
-export async function transferVault(vaultId: string, amount: number, type: 'DEPOSIT' | 'WITHDRAW', accountId: string) {
-  const { user, error } = await validateUser();
-  if (error || !user) return { error };
-
-  if (amount <= 0) return { error: "Valor deve ser maior que zero." };
-  if (!accountId) return { error: "Selecione a conta." };
-
-  const vault = await prisma.vault.findUnique({ where: { id: vaultId } });
-  if (!vault) return { error: "Cofrinho não encontrado" };
-
-  try {
-    await prisma.$transaction(async (tx) => {
-      const userAccount = await tx.bankAccount.findUnique({ where: { id: accountId } });
-      if (!userAccount) throw new Error("Conta bancária não encontrada.");
-      
-      const workspaceId = await getActiveWorkspaceId(user);
-      if (userAccount.workspaceId !== workspaceId) throw new Error("Use uma conta do seu workspace atual.");
-
-      const isDeposit = type === 'DEPOSIT';
-      
-      if (isDeposit && Number(userAccount.balance) < amount) throw new Error("Saldo insuficiente na conta.");
-      if (!isDeposit && Number(vault.balance) < amount) throw new Error("Saldo insuficiente no cofrinho.");
-
-      const accountOp = isDeposit ? 'decrement' : 'increment';
-      await tx.bankAccount.update({
-          where: { id: accountId },
-          data: { balance: { [accountOp]: amount } }
-      });
-
-      const vaultOp = isDeposit ? 'increment' : 'decrement';
-      const updatedVault = await tx.vault.update({
-          where: { id: vaultId },
-          data: { balance: { [vaultOp]: amount } }
-      });
-
-      if (updatedVault.goalId) {
-          await recalculateGoalBalance(updatedVault.goalId, tx);
-      }
-
-      const catType = isDeposit ? 'EXPENSE' : 'INCOME';
-      const category = await tx.category.upsert({
-          where: { workspaceId_name_type: { workspaceId: userAccount.workspaceId, name: "Metas", type: catType } },
-          update: {},
-          create: { name: "Metas", type: catType, workspaceId: userAccount.workspaceId, icon: "PiggyBank", color: "#f59e0b" }
-      });
-
-      await tx.transaction.create({
-        data: {
-          description: isDeposit ? `Aporte: ${vault.name}` : `Resgate: ${vault.name}`,
-          amount,
-          type: isDeposit ? 'VAULT_DEPOSIT' : 'VAULT_WITHDRAW',
-          date: new Date(),
-          workspaceId: userAccount.workspaceId,
-          bankAccountId: userAccount.id,
-          vaultId: vault.id,
-          isPaid: true,
-          categoryId: category.id
-        }
-      });
-    });
-
-    revalidatePath('/dashboard');
-    return { success: true };
-  } catch (e: any) { return { error: e.message || "Erro na movimentação." }; }
-}
-
-// --------------------------------------------------------
-// --- ATUALIZAÇÃO NO SCHEMA E NA ACTION DE METAS ---
-// --------------------------------------------------------
-
 const GoalSchema = z.object({
     name: z.string().min(1),
     targetAmount: z.coerce.number().positive(),
@@ -833,7 +821,36 @@ export async function upsertGoal(formData: FormData, id?: string, isShared = fal
                 const newGoal = await tx.goal.create({ data });
                 id = newGoal.id;
             } else {
-                await tx.goal.update({ where: { id }, data });
+                // SEGURANÇA
+                const existingGoal = await tx.goal.findUnique({
+                    where: { id },
+                    include: { workspace: true }
+                });
+
+                if (!existingGoal) throw new Error("Meta não encontrada.");
+
+                // Verifica permissões
+                // 1. Acesso Básico (Ver/Participar): Deve ser do mesmo Tenant
+                const hasAccess = existingGoal.tenantId === user.tenantId ||
+                                 (existingGoal.workspace && existingGoal.workspace.tenantId === user.tenantId);
+
+                if (!hasAccess) throw new Error("Sem permissão de acesso.");
+
+                // 2. Permissão de Edição (Alterar Nome/Valor):
+                //    - Se for meta pessoal: Deve ser dono do workspace.
+                //    - Se for meta compartilhada: Deve ser Admin do Tenant ou dono do workspace criador (se houver).
+                //    - Simplificação: Se o usuário tiver role ADMIN/OWNER no Tenant OU for membro do workspace criador com role ADMIN.
+
+                // Vamos simplificar: Se o workspaceId do usuário atual bater com o da meta, ou se ele for ADMIN do tenant.
+                const isCreatorWorkspace = existingGoal.workspaceId === workspaceId;
+                const isTenantAdmin = user.role === 'OWNER' || user.role === 'ADMIN';
+                const canEditDetails = isCreatorWorkspace || isTenantAdmin;
+
+                // Se tiver permissão, atualiza os dados da meta.
+                // Se não tiver (é apenas um participante vinculando cofrinho), PULA a atualização da meta para não sobrescrever dados.
+                if (canEditDetails) {
+                    await tx.goal.update({ where: { id }, data });
+                }
             }
 
             // Cenário A: Criar Novo Cofrinho
@@ -883,8 +900,302 @@ export async function upsertGoal(formData: FormData, id?: string, isShared = fal
 export async function deleteGoal(id: string) {
     const { user, error } = await validateUser('goals_delete');
     if (error || !user) return { error };
-    try { await prisma.goal.delete({ where: { id } }); } catch(e) { return { error: "Erro ao excluir meta." }; }
+    try {
+        // SEGURANÇA
+        const goal = await prisma.goal.findUnique({ where: { id }, include: { workspace: true } });
+        if (!goal) return { error: "Meta não encontrada" };
+
+        const isOwner = goal.tenantId === user.tenantId || (goal.workspace && goal.workspace.tenantId === user.tenantId);
+        if (!isOwner) return { error: "Sem permissão." };
+
+        await prisma.goal.delete({ where: { id } });
+    } catch(e) { return { error: "Erro ao excluir meta." }; }
     revalidatePath('/dashboard/goals');
     revalidatePath('/dashboard');
+    return { success: true };
+}
+
+// --------------------------------------------------------
+// --- MÓDULO DE COFRINHOS (ACTIONS DEDICADAS) ---
+// --------------------------------------------------------
+
+export async function upsertVault(formData: FormData, id?: string) {
+    const permission = id ? 'vaults_edit' : 'vaults_create';
+    const { user, error } = await validateUser(permission);
+    if (error || !user) return { error };
+
+    const parsed = VaultSchema.safeParse(Object.fromEntries(formData));
+    if (!parsed.success) return { error: "Dados inválidos" };
+    const { name, bankAccountId, targetAmount, balance, goalId } = parsed.data;
+
+    try {
+        if (id) {
+            // SEGURANÇA: Verificar propriedade
+            const existing = await prisma.vault.findUnique({
+                where: { id },
+                include: { bankAccount: { include: { workspace: true } } }
+            });
+
+            if (!existing || existing.bankAccount.workspace.tenantId !== user.tenantId) {
+                return { error: "Cofrinho não encontrado ou sem permissão." };
+            }
+
+            const data = { name, bankAccountId, targetAmount: targetAmount ?? null, goalId: goalId ?? null };
+            await prisma.vault.update({ where: { id }, data });
+            await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'UPDATE', entity: 'Vault', entityId: id, details: `Editou cofrinho ${name}` });
+            
+            // Se o goalId mudou, recalcular o saldo da meta anterior e da nova
+            if (existing.goalId && existing.goalId !== (goalId ?? null)) {
+                await recalculateGoalBalance(existing.goalId, prisma);
+            }
+            if (goalId) {
+                await recalculateGoalBalance(goalId, prisma);
+            }
+
+        } else {
+            const workspaceId = await getActiveWorkspaceId(user);
+            if (!workspaceId) return { error: "Sem workspace" };
+
+            // Verifica se a conta pertence ao workspace
+            const account = await prisma.bankAccount.findUnique({ where: { id: bankAccountId } });
+            if (!account || account.workspaceId !== workspaceId) return { error: "Conta inválida para este workspace." };
+            
+            const initialBalance = balance || 0;
+
+            const newVault = await prisma.vault.create({
+                data: {
+                    name,
+                    bankAccountId,
+                    targetAmount: targetAmount ?? null,
+                    balance: initialBalance,
+                    goalId: goalId ?? null,
+                }
+            });
+
+            // Se houver saldo inicial, deve criar uma transação de aporte e atualizar o saldo da conta.
+            if (initialBalance > 0) {
+                 await prisma.$transaction(async (tx) => {
+                    const category = await tx.category.upsert({
+                        where: { workspaceId_name_type: { workspaceId, name: "Metas", type: "VAULT_DEPOSIT" } },
+                        update: {},
+                        create: { name: "Metas", type: "VAULT_DEPOSIT", workspaceId, icon: "PiggyBank", color: "#f59e0b" }
+                    });
+
+                    // Cria a transação (Aporte Inicial)
+                    await tx.transaction.create({
+                        data: {
+                            description: `Aporte Inicial: ${name}`,
+                            amount: initialBalance,
+                            type: 'VAULT_DEPOSIT',
+                            date: new Date(),
+                            workspaceId,
+                            bankAccountId,
+                            vaultId: newVault.id,
+                            isPaid: true,
+                            categoryId: category.id
+                        }
+                    });
+                    
+                    // Atualiza saldo da conta
+                    await tx.bankAccount.update({ where: { id: bankAccountId }, data: { balance: { decrement: initialBalance } } });
+                });
+            }
+
+            // Recalcula saldo total da meta (se houver)
+            if (goalId) await recalculateGoalBalance(goalId, prisma);
+            
+            await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'CREATE', entity: 'Vault', entityId: newVault.id, details: `Criou cofrinho ${name}` });
+        }
+    } catch (e: any) { 
+        console.error(e);
+        return { error: e.message || "Erro ao salvar cofrinho." }; 
+    }
+
+    revalidatePath('/dashboard');
+    revalidatePath('/dashboard/goals');
+    return { success: true };
+}
+
+export async function deleteVault(id: string) {
+    const { user, error } = await validateUser('vaults_delete');
+    if (error || !user) return { error };
+
+    try {
+        const vault = await prisma.vault.findUnique({
+            where: { id },
+            include: { bankAccount: { include: { workspace: true } } }
+        });
+
+        if (!vault || vault.bankAccount.workspace.tenantId !== user.tenantId) {
+            return { error: "Cofrinho não encontrado ou sem permissão." };
+        }
+
+        // Se houver saldo, o sistema deve forçar o resgate para a conta antes de apagar.
+        if (Number(vault.balance) > 0) {
+            return { error: `O cofrinho possui saldo de R$ ${Number(vault.balance).toFixed(2)}. Transfira ou resgate o valor antes de excluir.` };
+        }
+
+        const goalId = vault.goalId;
+
+        await prisma.vault.delete({ where: { id } });
+        await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'DELETE', entity: 'Vault', details: `Apagou cofrinho ${vault.name}` });
+        
+        // Recalcula saldo total da meta (se houver e o cofrinho tinha saldo 0)
+        if (goalId) await recalculateGoalBalance(goalId, prisma);
+
+    } catch (e: any) { 
+        return { error: e.message || "Erro ao excluir cofrinho." }; 
+    }
+    
+    revalidatePath('/dashboard');
+    revalidatePath('/dashboard/goals');
+    return { success: true };
+}
+
+export async function transferVault(formData: FormData) {
+    const { user, error } = await validateUser('vaults_transfer');
+    if (error || !user) return { error };
+
+    const parsed = TransferVaultSchema.safeParse(Object.fromEntries(formData));
+    if (!parsed.success) return { error: "Dados inválidos" };
+    
+    const { sourceId, destinationId, amount, transferType } = parsed.data;
+    const date = new Date();
+    const isAToV = transferType === 'A_TO_V';
+    const isVToA = transferType === 'V_TO_A';
+    const isVToV = transferType === 'V_TO_V';
+
+    let sourceName = "";
+    let destinationName = "";
+    let workspaceId = "";
+
+    try {
+        await prisma.$transaction(async (tx) => {
+            if (isAToV || isVToA) {
+                const accountId = isAToV ? sourceId : destinationId;
+                const vaultId = isAToV ? destinationId : sourceId;
+                
+                const account = await tx.bankAccount.findUnique({ where: { id: accountId } });
+                const vault = await tx.vault.findUnique({ where: { id: vaultId }, include: { bankAccount: true, goal: true } });
+                
+                if (!account || !vault) throw new Error("Conta ou Cofrinho não encontrado.");
+                if (account.workspaceId !== vault.bankAccount.workspaceId) throw new Error("Recursos de workspaces diferentes.");
+                workspaceId = account.workspaceId;
+
+                sourceName = isAToV ? account.name : vault.name;
+                destinationName = isAToV ? vault.name : account.name;
+
+                // Check Balance
+                if (isVToA && Number(vault.balance) < amount) throw new Error("Saldo insuficiente no cofrinho de origem.");
+                if (isAToV && Number(account.balance) < amount) throw new Error("Saldo insuficiente na conta de origem.");
+
+                const accountOp = isAToV ? 'decrement' : 'increment';
+                const vaultOp = isAToV ? 'increment' : 'decrement';
+                const type = isAToV ? 'VAULT_DEPOSIT' : 'VAULT_WITHDRAW';
+                const descriptionPrefix = isAToV ? 'Aporte via Transf.' : 'Resgate via Transf.';
+
+                await tx.bankAccount.update({ where: { id: accountId }, data: { balance: { [accountOp]: amount } } });
+                const updatedVault = await tx.vault.update({ where: { id: vaultId }, data: { balance: { [vaultOp]: amount } } });
+                
+                if (updatedVault.goalId) await recalculateGoalBalance(updatedVault.goalId, tx);
+
+
+                const category = await tx.category.upsert({
+                    where: { workspaceId_name_type: { workspaceId, name: "Metas", type } },
+                    update: {},
+                    create: { name: "Metas", type, workspaceId, icon: "PiggyBank", color: "#f59e0b" }
+                });
+
+                await tx.transaction.create({
+                    data: {
+                        description: `${descriptionPrefix}: ${sourceName} > ${destinationName}`,
+                        amount, type, date, workspaceId, 
+                        bankAccountId: accountId, vaultId, 
+                        isPaid: true, categoryId: category.id
+                    }
+                });
+            } 
+            
+            else if (isVToV) {
+                const sourceVault = await tx.vault.findUnique({ where: { id: sourceId }, include: { bankAccount: true, goal: true } });
+                const destinationVault = await tx.vault.findUnique({ where: { id: destinationId }, include: { bankAccount: true, goal: true } });
+
+                if (!sourceVault || !destinationVault) throw new Error("Cofrinho(s) não encontrado(s).");
+                if (sourceVault.bankAccount.workspaceId !== destinationVault.bankAccount.workspaceId) throw new Error("Cofrinhos de workspaces diferentes.");
+                workspaceId = sourceVault.bankAccount.workspaceId;
+
+                sourceName = sourceVault.name;
+                destinationName = destinationVault.name;
+
+                // Check Balance
+                if (Number(sourceVault.balance) < amount) throw new Error("Saldo insuficiente no cofrinho de origem.");
+
+                // Debit source vault & Credit destination vault
+                await tx.vault.update({ where: { id: sourceId }, data: { balance: { decrement: amount } } });
+                await tx.vault.update({ where: { id: destinationId }, data: { balance: { increment: amount } } });
+                
+                // Recalculate balances for both goals if they exist
+                if (sourceVault.goalId) await recalculateGoalBalance(sourceVault.goalId, tx);
+                if (destinationVault.goalId) await recalculateGoalBalance(destinationVault.goalId, tx);
+
+
+                if (sourceVault.bankAccountId !== destinationVault.bankAccountId) {
+                     // Movimento de conta é necessário
+                     const transferCat = await tx.category.upsert({
+                        where: { workspaceId_name_type: { workspaceId, name: "Transferência Cofrinho", type: "TRANSFER" } },
+                        update: {},
+                        create: { name: "Transferência Cofrinho", type: "TRANSFER", workspaceId, icon: "ArrowRightLeft", color: "#64748b" }
+                    });
+
+                    // Debit Source Account
+                    await tx.bankAccount.update({ where: { id: sourceVault.bankAccountId }, data: { balance: { decrement: amount } } });
+                    // Credit Destination Account
+                    await tx.bankAccount.update({ where: { id: destinationVault.bankAccountId }, data: { balance: { increment: amount } } });
+
+                    // Create transaction for reconciliation
+                    await tx.transaction.create({
+                        data: {
+                            description: `Transf. entre Cofrinhos: ${sourceName} > ${destinationName}`,
+                            amount, type: 'TRANSFER', date, workspaceId, 
+                            bankAccountId: sourceVault.bankAccountId, 
+                            recipientAccountId: destinationVault.bankAccountId,
+                            isPaid: true, categoryId: transferCat.id
+                            // Não vamos atribuir vaultId/destinationVaultId na Transaction entity, pois é uma transferência de conta.
+                        }
+                    });
+
+                } else {
+                    // Mesma conta bancária, apenas o movimento entre cofrinhos é registrado
+                    const vaultTransferCat = await tx.category.upsert({
+                        where: { workspaceId_name_type: { workspaceId, name: "Transf. Cofrinho (Interna)", type: "TRANSFER" } },
+                        update: {},
+                        create: { name: "Transf. Cofrinho (Interna)", type: "TRANSFER", workspaceId, icon: "ArrowRightLeft", color: "#64748b" }
+                    });
+                    
+                    // Cria uma transação para registrar o movimento interno
+                    await tx.transaction.create({
+                        data: {
+                            description: `Transf. Cofrinhos (Interna): ${sourceName} > ${destinationName}`,
+                            amount, type: 'TRANSFER', date, workspaceId, 
+                            bankAccountId: sourceVault.bankAccountId, 
+                            recipientAccountId: sourceVault.bankAccountId, // Transferência de conta para a própria conta
+                            isPaid: true, categoryId: vaultTransferCat.id,
+                            vaultId: sourceVault.id,
+                        }
+                    });
+                }
+            } else {
+                 throw new Error("Tipo de transferência não suportado ou IDs ausentes.");
+            }
+        });
+        
+        await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'ACTION', entity: 'Vault', details: `Transferiu R$ ${amount} de ${sourceName} para ${destinationName}` });
+
+    } catch(e: any) { 
+        return { error: e.message || "Erro na transferência." }; 
+    }
+
+    revalidatePath('/dashboard');
+    revalidatePath('/dashboard/goals');
     return { success: true };
 }

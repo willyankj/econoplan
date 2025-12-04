@@ -59,17 +59,10 @@ export async function GET(request: Request) {
                     data: { nextRecurringDate: nextDate }
                 });
 
-                // 4. Auditoria (Opcional, mas recomendado para rastreio)
-                await ptx.auditLog.create({
-                    data: {
-                        tenantId: tx.workspace.tenantId,
-                        userId: 'system-cron', // Marcador de sistema
-                        action: 'CREATE',
-                        entity: 'Transaction',
-                        entityId: newTx.id,
-                        details: `Recorrência automática: ${tx.description}`
-                    }
-                });
+                // 4. Auditoria REMOVIDA temporariamente
+                // Motivo: userId 'system-cron' viola FK de User se não existir um usuário real com esse ID.
+                // TODO: Criar usuário de sistema ou tornar userId opcional em AuditLog.
+                // console.log(`[CRON] Recorrência gerada: ${newTx.id}`);
             });
 
             processed++;

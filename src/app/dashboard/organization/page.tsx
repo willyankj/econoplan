@@ -9,7 +9,6 @@ import { DepositGoalModal } from "@/components/dashboard/goals/deposit-goal-moda
 import { checkPermission } from "@/lib/permissions";
 import { TenantOverviewCharts } from "@/components/dashboard/organization/tenant-overview-charts";
 import { TenantRecentTransactions } from "@/components/dashboard/organization/tenant-recent-transactions";
-import { DateMonthSelector } from "@/components/dashboard/date-month-selector";
 import { OrgFilters } from "@/components/dashboard/organization/org-filters";
 import { GoalAnalytics } from "@/components/dashboard/organization/goal-analytics"; 
 import { formatCurrency } from "@/lib/utils";
@@ -54,8 +53,9 @@ export default async function OrganizationPage({
   }
 
   // Tratamento de filtros para evitar strings "undefined"
-  const filterWorkspaceId = (params.filterWorkspace && params.filterWorkspace !== 'ALL') ? params.filterWorkspace : undefined;
-  const filterType = (params.filterType && params.filterType !== 'ALL') ? params.filterType : undefined;
+  // CORREÇÃO: Usando chaves padronizadas (workspaceId, type) compatíveis com o novo DataFilter
+  const filterWorkspaceId = (params.workspaceId && params.workspaceId !== 'ALL') ? params.workspaceId : (params.filterWorkspace && params.filterWorkspace !== 'ALL' ? params.filterWorkspace : undefined);
+  const filterType = (params.type && params.type !== 'ALL') ? params.type : (params.filterType && params.filterType !== 'ALL' ? params.filterType : undefined);
 
   // 1. DADOS DE ANALYTICS (GRÁFICOS E TOTAIS)
   // Substitui a lógica manual anterior pela chamada da função dedicada
@@ -145,7 +145,6 @@ export default async function OrganizationPage({
             <p className="text-muted-foreground">Gestão centralizada da organização.</p>
         </div>
         <div className="flex items-center gap-2 w-full md:w-auto">
-            <DateMonthSelector />
             <OrgFilters workspaces={workspacesList} />
         </div>
       </div>

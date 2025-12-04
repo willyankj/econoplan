@@ -20,13 +20,17 @@ import { formatCurrency } from "@/lib/utils";
 
 import { getRecurringTransactions } from "@/app/dashboard/actions";
 import { RecurringModal } from "@/components/dashboard/transactions/recurring-modal";
+import { PaginationControls } from "@/components/ui/pagination-controls";
 
 export const dynamic = 'force-dynamic';
 
 export default async function TransactionsPage({
   searchParams
 }: {
-  searchParams: Promise<{ type?: string, q?: string, cardId?: string, accountId?: string, from?: string, to?: string, categoryId?: string }>
+  searchParams: Promise<{
+      type?: string, q?: string, cardId?: string, accountId?: string,
+      from?: string, to?: string, categoryId?: string, page?: string
+  }>
 }) {
   const { workspaceId, user } = await getUserWorkspace();
   if (!workspaceId || !user) redirect("/login");
@@ -106,17 +110,29 @@ export default async function TransactionsPage({
     };
   }
 
-  const transactions = await prisma.transaction.findMany({
-    where: whereCondition,
-    orderBy: { date: 'desc' },
-    take: 100,
-    include: { 
-        category: true, 
-        bankAccount: true, 
-        creditCard: true,
-        vault: { include: { goal: true } }
-    }
-  });
+  // PAGINAÇÃO
+  const page = Number(params.page) || 1;
+  const itemsPerPage = 20;
+  const skip = (page - 1) * itemsPerPage;
+
+  const [totalItems, transactions] = await prisma.$transaction([
+      prisma.transaction.count({ where: whereCondition }),
+      prisma.transaction.findMany({
+        where: whereCondition,
+        orderBy: { date: 'desc' },
+        skip: skip,
+        take: itemsPerPage,
+        include: {
+            category: true,
+            bankAccount: true,
+            recipientAccount: true,
+            creditCard: true,
+            vault: { include: { goal: true } }
+        }
+      })
+  ]);
+
+  const totalPages = Math.ceil(totalItems / itemsPerPage);
 
   const transactionsForExport = transactions.map(t => ({
     description: t.description,
@@ -134,7 +150,7 @@ export default async function TransactionsPage({
             {params.cardId ? 'Extrato do Cartão' : 'Extrato Geral'}
           </h2>
           <p className="text-muted-foreground">
-            {transactions.length} lançamento(s) encontrado(s)
+            {totalItems} lançamento(s) encontrado(s)
           </p>
         </div>
           
@@ -238,19 +254,43 @@ export default async function TransactionsPage({
                     </TableCell>
 
                     <TableCell>
-                        <Badge variant="outline" className="bg-muted text-muted-foreground border-border font-normal gap-1 pr-3">
-                            {(() => {
-                                if (!t.category) return <span>Geral</span>;
-                                // @ts-ignore
-                                const CatIcon = Icons[t.category.icon] || Icons.Tag;
-                                return (
-                                    <>
-                                        <CatIcon className="w-3 h-3" style={{ color: t.category.color || 'inherit' }} />
-                                        <span style={{ color: t.category.color || 'inherit' }}>{t.category.name}</span>
-                                    </>
-                                );
-                            })()}
-                        </Badge>
+                        {t.type === 'TRANSFER' && t.recipientAccount ? (
+                            <div className="flex flex-col gap-1">
+                                <Badge variant="outline" className="bg-blue-500/5 text-blue-600 border-blue-200 font-normal w-fit gap-1">
+                                    <Icons.ArrowRightLeft className="w-3 h-3" />
+                                    Transferência
+                                </Badge>
+                                <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+                                    {t.bankAccount?.name} <Icons.ArrowRight className="w-3 h-3" /> {t.recipientAccount.name}
+                                </span>
+                            </div>
+                        ) : (t.type === 'VAULT_DEPOSIT' || t.type === 'VAULT_WITHDRAW') ? (
+                             <div className="flex flex-col gap-1">
+                                <Badge variant="outline" className="bg-amber-500/5 text-amber-600 border-amber-200 font-normal w-fit gap-1">
+                                    <Icons.PiggyBank className="w-3 h-3" />
+                                    {t.type === 'VAULT_DEPOSIT' ? 'Aporte' : 'Resgate'}
+                                </Badge>
+                                {t.vault && (
+                                    <span className="text-[10px] text-muted-foreground">
+                                        {t.vault.name}
+                                    </span>
+                                )}
+                            </div>
+                        ) : (
+                            <Badge variant="outline" className="bg-muted text-muted-foreground border-border font-normal gap-1 pr-3">
+                                {(() => {
+                                    if (!t.category) return <span>Geral</span>;
+                                    // @ts-ignore
+                                    const CatIcon = Icons[t.category.icon] || Icons.Tag;
+                                    return (
+                                        <>
+                                            <CatIcon className="w-3 h-3" style={{ color: t.category.color || 'inherit' }} />
+                                            <span style={{ color: t.category.color || 'inherit' }}>{t.category.name}</span>
+                                        </>
+                                    );
+                                })()}
+                            </Badge>
+                        )}
                     </TableCell>
                     
                     <TableCell className="text-muted-foreground">
@@ -271,10 +311,31 @@ export default async function TransactionsPage({
 
                     </TableRow>
                 )})}
+                {totalItems === 0 && (
+                    <TableRow>
+                        <TableCell colSpan={7} className="h-48 text-center text-muted-foreground">
+                            <div className="flex flex-col items-center justify-center gap-2">
+                                <Icons.Ghost className="w-10 h-10 opacity-20" />
+                                <p>Nenhum lançamento encontrado.</p>
+                                <p className="text-xs opacity-50">Tente ajustar os filtros ou adicione uma nova transação.</p>
+                            </div>
+                        </TableCell>
+                    </TableRow>
+                )}
                 </TableBody>
             </Table>
           </div>
         </CardContent>
+        {totalItems > 0 && (
+            <div className="border-t border-border bg-muted/20">
+                <PaginationControls
+                    currentPage={page}
+                    totalPages={totalPages}
+                    totalItems={totalItems}
+                    itemsPerPage={itemsPerPage}
+                />
+            </div>
+        )}
       </Card>
     </div>
   );

@@ -66,7 +66,7 @@ export function CategoryModal({ category, open: controlledOpen, onOpenChange }: 
       <DialogContent className="bg-card border-border text-card-foreground sm:max-w-[450px] p-0 gap-0 rounded-xl overflow-hidden">
         
         <form onSubmit={handleSubmit} className="flex flex-col">
-            <div className="bg-blue-50 dark:bg-blue-950/20 p-6 pb-8 transition-colors duration-300 flex flex-col items-center justify-center relative">
+            <div className="bg-slate-50 dark:bg-slate-900/50 p-6 pb-8 transition-colors duration-300 flex flex-col items-center justify-center relative">
                 <DialogHeader className="mb-6 w-full relative z-10">
                     <DialogTitle className="text-center text-muted-foreground font-medium text-sm uppercase tracking-wider">
                         {isEditing ? "Editar Categoria" : "Nova Categoria"}
@@ -74,7 +74,7 @@ export function CategoryModal({ category, open: controlledOpen, onOpenChange }: 
                 </DialogHeader>
 
                 <div 
-                    className="w-24 h-24 rounded-full flex items-center justify-center shadow-lg bg-background border-4 border-white dark:border-slate-800 relative z-10 transition-transform hover:scale-105" 
+                    className="w-20 h-20 rounded-full flex items-center justify-center shadow-sm bg-background border border-border relative z-10 transition-transform hover:scale-105"
                     style={{ color: selectedColor }}
                 >
                     <IconPicker 
@@ -85,21 +85,21 @@ export function CategoryModal({ category, open: controlledOpen, onOpenChange }: 
                     />
                 </div>
                 
-                <p className="text-xs text-muted-foreground mt-3 font-medium opacity-70">
-                    Toque no ícone para alterar
+                <p className="text-[10px] text-muted-foreground mt-3 uppercase tracking-wide opacity-70">
+                    Toque para alterar o ícone
                 </p>
             </div>
 
-            <div className="p-6 space-y-6 bg-card">
+            <div className="p-6 space-y-5 bg-card">
                 <div className="grid gap-1.5">
-                    <Label className="text-xs text-muted-foreground ml-1 font-semibold uppercase">Nome da Categoria</Label>
-                    <Input name="name" defaultValue={category?.name} placeholder="Ex: Alimentação, Lazer..." className="bg-muted/50 border-transparent focus:border-primary focus:bg-background transition-all h-11" required />
+                    <Label className="text-xs text-muted-foreground ml-1">Nome da Categoria</Label>
+                    <Input name="name" defaultValue={category?.name} placeholder="Ex: Alimentação, Lazer..." className="bg-muted/50 border-transparent focus:border-primary focus:bg-background transition-all h-12" required />
                 </div>
 
                 <div className="grid gap-1.5">
-                    <Label className="text-xs text-muted-foreground ml-1 font-semibold uppercase">Tipo de Movimentação</Label>
+                    <Label className="text-xs text-muted-foreground ml-1">Tipo de Movimentação</Label>
                     <Select name="type" defaultValue={category?.type || 'EXPENSE'}>
-                        <SelectTrigger className="bg-muted/50 border-transparent w-full h-11">
+                        <SelectTrigger className="bg-muted/50 border-transparent w-full h-12">
                             <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -110,8 +110,8 @@ export function CategoryModal({ category, open: controlledOpen, onOpenChange }: 
                 </div>
 
                 <div className="grid gap-2">
-                    <Label className="text-xs text-muted-foreground ml-1 font-semibold uppercase">Cor da Tag</Label>
-                    <div className="flex gap-3 flex-wrap justify-center bg-muted/30 p-4 rounded-xl border border-border/50 shadow-inner">
+                    <Label className="text-xs text-muted-foreground ml-1">Cor da Tag</Label>
+                    <div className="flex gap-3 flex-wrap justify-center bg-muted/30 p-4 rounded-xl border border-border/50">
                         {COLORS.map(c => (
                             <button
                                 key={c}
