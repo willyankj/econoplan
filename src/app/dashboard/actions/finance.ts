@@ -72,6 +72,23 @@ const PayInvoiceSchema = z.object({
   date: z.string(),
 });
 
+// --- SCHEMAS PARA COFRINHOS E MOVIMENTAÇÃO ---
+const VaultSchema = z.object({
+    name: z.string().min(1, "Nome obrigatório"),
+    bankAccountId: z.string().uuid("Conta bancária inválida"),
+    targetAmount: z.coerce.number().optional().nullable(),
+    balance: z.coerce.number().optional(), 
+    goalId: z.string().uuid().optional().nullable(),
+});
+
+const TransferVaultSchema = z.object({
+    sourceId: z.string().min(1, "Origem obrigatória"),
+    destinationId: z.string().min(1, "Destino obrigatório"),
+    amount: z.coerce.number().positive("Valor inválido"),
+    transferType: z.enum(['A_TO_V', 'V_TO_A', 'V_TO_V']),
+});
+
+
 // --- ACTIONS DE CONTAS ---
 
 export async function upsertAccount(formData: FormData, id?: string) {
@@ -895,5 +912,290 @@ export async function deleteGoal(id: string) {
     } catch(e) { return { error: "Erro ao excluir meta." }; }
     revalidatePath('/dashboard/goals');
     revalidatePath('/dashboard');
+    return { success: true };
+}
+
+// --------------------------------------------------------
+// --- MÓDULO DE COFRINHOS (ACTIONS DEDICADAS) ---
+// --------------------------------------------------------
+
+export async function upsertVault(formData: FormData, id?: string) {
+    const permission = id ? 'vaults_edit' : 'vaults_create';
+    const { user, error } = await validateUser(permission);
+    if (error || !user) return { error };
+
+    const parsed = VaultSchema.safeParse(Object.fromEntries(formData));
+    if (!parsed.success) return { error: "Dados inválidos" };
+    const { name, bankAccountId, targetAmount, balance, goalId } = parsed.data;
+
+    try {
+        if (id) {
+            // SEGURANÇA: Verificar propriedade
+            const existing = await prisma.vault.findUnique({
+                where: { id },
+                include: { bankAccount: { include: { workspace: true } } }
+            });
+
+            if (!existing || existing.bankAccount.workspace.tenantId !== user.tenantId) {
+                return { error: "Cofrinho não encontrado ou sem permissão." };
+            }
+
+            const data = { name, bankAccountId, targetAmount: targetAmount ?? null, goalId: goalId ?? null };
+            await prisma.vault.update({ where: { id }, data });
+            await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'UPDATE', entity: 'Vault', entityId: id, details: `Editou cofrinho ${name}` });
+            
+            // Se o goalId mudou, recalcular o saldo da meta anterior e da nova
+            if (existing.goalId && existing.goalId !== (goalId ?? null)) {
+                await recalculateGoalBalance(existing.goalId, prisma);
+            }
+            if (goalId) {
+                await recalculateGoalBalance(goalId, prisma);
+            }
+
+        } else {
+            const workspaceId = await getActiveWorkspaceId(user);
+            if (!workspaceId) return { error: "Sem workspace" };
+
+            // Verifica se a conta pertence ao workspace
+            const account = await prisma.bankAccount.findUnique({ where: { id: bankAccountId } });
+            if (!account || account.workspaceId !== workspaceId) return { error: "Conta inválida para este workspace." };
+            
+            const initialBalance = balance || 0;
+
+            const newVault = await prisma.vault.create({
+                data: {
+                    name,
+                    bankAccountId,
+                    targetAmount: targetAmount ?? null,
+                    balance: initialBalance,
+                    goalId: goalId ?? null,
+                }
+            });
+
+            // Se houver saldo inicial, deve criar uma transação de aporte e atualizar o saldo da conta.
+            if (initialBalance > 0) {
+                 await prisma.$transaction(async (tx) => {
+                    const category = await tx.category.upsert({
+                        where: { workspaceId_name_type: { workspaceId, name: "Metas", type: "VAULT_DEPOSIT" } },
+                        update: {},
+                        create: { name: "Metas", type: "VAULT_DEPOSIT", workspaceId, icon: "PiggyBank", color: "#f59e0b" }
+                    });
+
+                    // Cria a transação (Aporte Inicial)
+                    await tx.transaction.create({
+                        data: {
+                            description: `Aporte Inicial: ${name}`,
+                            amount: initialBalance,
+                            type: 'VAULT_DEPOSIT',
+                            date: new Date(),
+                            workspaceId,
+                            bankAccountId,
+                            vaultId: newVault.id,
+                            isPaid: true,
+                            categoryId: category.id
+                        }
+                    });
+                    
+                    // Atualiza saldo da conta
+                    await tx.bankAccount.update({ where: { id: bankAccountId }, data: { balance: { decrement: initialBalance } } });
+                });
+            }
+
+            // Recalcula saldo total da meta (se houver)
+            if (goalId) await recalculateGoalBalance(goalId, prisma);
+            
+            await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'CREATE', entity: 'Vault', entityId: newVault.id, details: `Criou cofrinho ${name}` });
+        }
+    } catch (e: any) { 
+        console.error(e);
+        return { error: e.message || "Erro ao salvar cofrinho." }; 
+    }
+
+    revalidatePath('/dashboard');
+    revalidatePath('/dashboard/goals');
+    return { success: true };
+}
+
+export async function deleteVault(id: string) {
+    const { user, error } = await validateUser('vaults_delete');
+    if (error || !user) return { error };
+
+    try {
+        const vault = await prisma.vault.findUnique({
+            where: { id },
+            include: { bankAccount: { include: { workspace: true } } }
+        });
+
+        if (!vault || vault.bankAccount.workspace.tenantId !== user.tenantId) {
+            return { error: "Cofrinho não encontrado ou sem permissão." };
+        }
+
+        // Se houver saldo, o sistema deve forçar o resgate para a conta antes de apagar.
+        if (Number(vault.balance) > 0) {
+            return { error: `O cofrinho possui saldo de R$ ${Number(vault.balance).toFixed(2)}. Transfira ou resgate o valor antes de excluir.` };
+        }
+
+        const goalId = vault.goalId;
+
+        await prisma.vault.delete({ where: { id } });
+        await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'DELETE', entity: 'Vault', details: `Apagou cofrinho ${vault.name}` });
+        
+        // Recalcula saldo total da meta (se houver e o cofrinho tinha saldo 0)
+        if (goalId) await recalculateGoalBalance(goalId, prisma);
+
+    } catch (e: any) { 
+        return { error: e.message || "Erro ao excluir cofrinho." }; 
+    }
+    
+    revalidatePath('/dashboard');
+    revalidatePath('/dashboard/goals');
+    return { success: true };
+}
+
+export async function transferVault(formData: FormData) {
+    const { user, error } = await validateUser('vaults_transfer');
+    if (error || !user) return { error };
+
+    const parsed = TransferVaultSchema.safeParse(Object.fromEntries(formData));
+    if (!parsed.success) return { error: "Dados inválidos" };
+    
+    const { sourceId, destinationId, amount, transferType } = parsed.data;
+    const date = new Date();
+    const isAToV = transferType === 'A_TO_V';
+    const isVToA = transferType === 'V_TO_A';
+    const isVToV = transferType === 'V_TO_V';
+
+    let sourceName = "";
+    let destinationName = "";
+    let workspaceId = "";
+
+    try {
+        await prisma.$transaction(async (tx) => {
+            if (isAToV || isVToA) {
+                const accountId = isAToV ? sourceId : destinationId;
+                const vaultId = isAToV ? destinationId : sourceId;
+                
+                const account = await tx.bankAccount.findUnique({ where: { id: accountId } });
+                const vault = await tx.vault.findUnique({ where: { id: vaultId }, include: { bankAccount: true, goal: true } });
+                
+                if (!account || !vault) throw new Error("Conta ou Cofrinho não encontrado.");
+                if (account.workspaceId !== vault.bankAccount.workspaceId) throw new Error("Recursos de workspaces diferentes.");
+                workspaceId = account.workspaceId;
+
+                sourceName = isAToV ? account.name : vault.name;
+                destinationName = isAToV ? vault.name : account.name;
+
+                // Check Balance
+                if (isVToA && Number(vault.balance) < amount) throw new Error("Saldo insuficiente no cofrinho de origem.");
+                if (isAToV && Number(account.balance) < amount) throw new Error("Saldo insuficiente na conta de origem.");
+
+                const accountOp = isAToV ? 'decrement' : 'increment';
+                const vaultOp = isAToV ? 'increment' : 'decrement';
+                const type = isAToV ? 'VAULT_DEPOSIT' : 'VAULT_WITHDRAW';
+                const descriptionPrefix = isAToV ? 'Aporte via Transf.' : 'Resgate via Transf.';
+
+                await tx.bankAccount.update({ where: { id: accountId }, data: { balance: { [accountOp]: amount } } });
+                const updatedVault = await tx.vault.update({ where: { id: vaultId }, data: { balance: { [vaultOp]: amount } } });
+                
+                if (updatedVault.goalId) await recalculateGoalBalance(updatedVault.goalId, tx);
+
+
+                const category = await tx.category.upsert({
+                    where: { workspaceId_name_type: { workspaceId, name: "Metas", type } },
+                    update: {},
+                    create: { name: "Metas", type, workspaceId, icon: "PiggyBank", color: "#f59e0b" }
+                });
+
+                await tx.transaction.create({
+                    data: {
+                        description: `${descriptionPrefix}: ${sourceName} > ${destinationName}`,
+                        amount, type, date, workspaceId, 
+                        bankAccountId: accountId, vaultId, 
+                        isPaid: true, categoryId: category.id
+                    }
+                });
+            } 
+            
+            else if (isVToV) {
+                const sourceVault = await tx.vault.findUnique({ where: { id: sourceId }, include: { bankAccount: true, goal: true } });
+                const destinationVault = await tx.vault.findUnique({ where: { id: destinationId }, include: { bankAccount: true, goal: true } });
+
+                if (!sourceVault || !destinationVault) throw new Error("Cofrinho(s) não encontrado(s).");
+                if (sourceVault.bankAccount.workspaceId !== destinationVault.bankAccount.workspaceId) throw new Error("Cofrinhos de workspaces diferentes.");
+                workspaceId = sourceVault.bankAccount.workspaceId;
+
+                sourceName = sourceVault.name;
+                destinationName = destinationVault.name;
+
+                // Check Balance
+                if (Number(sourceVault.balance) < amount) throw new Error("Saldo insuficiente no cofrinho de origem.");
+
+                // Debit source vault & Credit destination vault
+                await tx.vault.update({ where: { id: sourceId }, data: { balance: { decrement: amount } } });
+                await tx.vault.update({ where: { id: destinationId }, data: { balance: { increment: amount } } });
+                
+                // Recalculate balances for both goals if they exist
+                if (sourceVault.goalId) await recalculateGoalBalance(sourceVault.goalId, tx);
+                if (destinationVault.goalId) await recalculateGoalBalance(destinationVault.goalId, tx);
+
+
+                if (sourceVault.bankAccountId !== destinationVault.bankAccountId) {
+                     // Movimento de conta é necessário
+                     const transferCat = await tx.category.upsert({
+                        where: { workspaceId_name_type: { workspaceId, name: "Transferência Cofrinho", type: "TRANSFER" } },
+                        update: {},
+                        create: { name: "Transferência Cofrinho", type: "TRANSFER", workspaceId, icon: "ArrowRightLeft", color: "#64748b" }
+                    });
+
+                    // Debit Source Account
+                    await tx.bankAccount.update({ where: { id: sourceVault.bankAccountId }, data: { balance: { decrement: amount } } });
+                    // Credit Destination Account
+                    await tx.bankAccount.update({ where: { id: destinationVault.bankAccountId }, data: { balance: { increment: amount } } });
+
+                    // Create transaction for reconciliation
+                    await tx.transaction.create({
+                        data: {
+                            description: `Transf. entre Cofrinhos: ${sourceName} > ${destinationName}`,
+                            amount, type: 'TRANSFER', date, workspaceId, 
+                            bankAccountId: sourceVault.bankAccountId, 
+                            recipientAccountId: destinationVault.bankAccountId,
+                            isPaid: true, categoryId: transferCat.id
+                            // Não vamos atribuir vaultId/destinationVaultId na Transaction entity, pois é uma transferência de conta.
+                        }
+                    });
+
+                } else {
+                    // Mesma conta bancária, apenas o movimento entre cofrinhos é registrado
+                    const vaultTransferCat = await tx.category.upsert({
+                        where: { workspaceId_name_type: { workspaceId, name: "Transf. Cofrinho (Interna)", type: "TRANSFER" } },
+                        update: {},
+                        create: { name: "Transf. Cofrinho (Interna)", type: "TRANSFER", workspaceId, icon: "ArrowRightLeft", color: "#64748b" }
+                    });
+                    
+                    // Cria uma transação para registrar o movimento interno
+                    await tx.transaction.create({
+                        data: {
+                            description: `Transf. Cofrinhos (Interna): ${sourceName} > ${destinationName}`,
+                            amount, type: 'TRANSFER', date, workspaceId, 
+                            bankAccountId: sourceVault.bankAccountId, 
+                            recipientAccountId: sourceVault.bankAccountId, // Transferência de conta para a própria conta
+                            isPaid: true, categoryId: vaultTransferCat.id,
+                            vaultId: sourceVault.id,
+                        }
+                    });
+                }
+            } else {
+                 throw new Error("Tipo de transferência não suportado ou IDs ausentes.");
+            }
+        });
+        
+        await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'ACTION', entity: 'Vault', details: `Transferiu R$ ${amount} de ${sourceName} para ${destinationName}` });
+
+    } catch(e: any) { 
+        return { error: e.message || "Erro na transferência." }; 
+    }
+
+    revalidatePath('/dashboard');
+    revalidatePath('/dashboard/goals');
     return { success: true };
 }

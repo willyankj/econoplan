@@ -9,7 +9,6 @@ echo "========================================"
 
 # 1. Baixar as atualizações do GitHub
 echo "📥 1. Baixando alterações do Git..."
-git pull
 
 # 2. Instalar novas dependências
 echo "📦 2. Verificando dependências..."
