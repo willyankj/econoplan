@@ -129,53 +129,17 @@ export async function getDashboardOverviewData(params: { month?: string, from?: 
       }
     });
 
-    // 3.1 CÁLCULO DE SALDO ACUMULADO (RUNNING BALANCE)
-    const today = new Date();
-    let endOfChartBalance = totalBalance;
+    // 3.1 CÁLCULO DE FLUXO DE CAIXA ACUMULADO (FORWARD)
+    // Solicitação do usuário: "Receita - Despesa no primeiro dia, nos próximos, saldo remanescente + receita - despesa"
+    // Isso ignora o saldo inicial da conta bancária e foca puramente no fluxo acumulado do período.
 
-    // Ajuste de Gap (apenas se gráfico termina no passado)
-    // Se termina no futuro ou hoje, assume-se que totalBalance já inclui transações "pagas"
-    if (globalDates.endDate < today) {
-        const gapTransactions = await prisma.transaction.findMany({
-            where: {
-                workspaceId,
-                date: { gt: globalDates.endDate, lte: today },
-                creditCardId: null
-            },
-            select: { amount: true, type: true, bankAccountId: true, recipientAccountId: true }
-        });
-
-        const gapNet = gapTransactions.reduce((acc, t) => {
-            const val = toDecimal(t.amount);
-            if (t.type === 'INCOME') return acc + val;
-            if (t.type === 'EXPENSE') return acc - val;
-            if (t.type === 'VAULT_DEPOSIT') return acc - val;
-            if (t.type === 'VAULT_WITHDRAW') return acc + val;
-            if (t.type === 'TRANSFER') {
-                 let change = -val;
-                 if (t.recipientAccountId && workspaceAccountIds.has(t.recipientAccountId)) change += val;
-                 return acc + change;
-            }
-            return acc;
-        }, 0);
-
-        endOfChartBalance = totalBalance - gapNet;
-    }
-
-    // Converter Map para Array ordenado para iteração
     const chartArray = Array.from(chartMap.values());
-    let runningBalance = endOfChartBalance;
+    let runningBalance = 0;
 
-    // Iterar de trás para frente
-    for (let i = chartArray.length - 1; i >= 0; i--) {
+    for (let i = 0; i < chartArray.length; i++) {
         const entry = chartArray[i];
-
-        // O saldo plotado no ponto "i" é o saldo ao FINAL daquele dia/mês.
+        runningBalance += entry.netChange;
         entry.balance = runningBalance;
-
-        // Para a próxima iteração (dia anterior), removemos o efeito do dia atual.
-        // Saldo(Ontem) = Saldo(Hoje) - NetChange(Hoje)
-        runningBalance = runningBalance - entry.netChange;
     }
 
     // 4. ORÇAMENTOS
