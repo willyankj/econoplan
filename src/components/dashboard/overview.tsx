@@ -17,7 +17,7 @@ interface DashboardData {
   totalBalance: number;
   monthlyIncome: number;
   monthlyExpense: number;
-  chartData: { name: string; income: number; expense: number }[];
+  chartData: { name: string; income: number; expense: number; balance?: number }[];
   lastTransactions: any[]; 
   budgets: { id: string; categoryName: string; target: number; spent: number }[];
   goals: any[];
@@ -33,7 +33,11 @@ export function DashboardOverview({ data }: { data: DashboardData }) {
           <p className="text-muted-foreground mb-2 pb-2 border-b border-border">{label}</p>
           {payload.map((entry: any, index: number) => (
             <div key={index} className="flex items-center justify-between gap-4 mb-1 last:mb-0">
-              <span className={`font-medium ${entry.name === 'Receitas' ? 'text-emerald-500' : 'text-rose-500'}`}>{entry.name}:</span>
+              <span className={`font-medium ${
+                  entry.name === 'Receitas' ? 'text-emerald-500' :
+                  entry.name === 'Despesas' ? 'text-rose-500' :
+                  'text-blue-500'
+              }`}>{entry.name}:</span>
               <span className="text-foreground font-bold">{formatCurrency(entry.value)}</span>
             </div>
           ))}
@@ -138,6 +142,7 @@ export function DashboardOverview({ data }: { data: DashboardData }) {
                 <Tooltip content={<CustomTooltip />} cursor={{fill: 'transparent'}} />
                 <Area type="monotone" dataKey="income" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorIncome)" name="Receitas" />
                 <Area type="monotone" dataKey="expense" stroke="#f43f5e" strokeWidth={2} fillOpacity={1} fill="url(#colorExpense)" name="Despesas" />
+                <Area type="monotone" dataKey="balance" stroke="#3b82f6" strokeWidth={2} fillOpacity={0} name="Saldo" dot={{ r: 2, fill: "#3b82f6" }} activeDot={{ r: 4 }} />
               </AreaChart>
             </ResponsiveContainer>
           </div>

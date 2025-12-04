@@ -3,15 +3,148 @@
 import { prisma } from "@/lib/prisma";
 import { validateUser, getActiveWorkspaceId } from "@/lib/action-utils";
 import {
-    startOfMonth, endOfMonth, format, subMonths,
+    format, subMonths,
     differenceInCalendarMonths, isBefore, addMonths, addWeeks, addYears,
     formatMonthYear, formatMonthShort, getMonthKey
 } from "@/lib/date-utils";
+import { startOfMonth, endOfMonth } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toDecimal, TRANSACTION_TYPES } from "@/lib/finance-utils";
 
 // ============================================================================
-// 1. ORÁCULO FINANCEIRO (FLUXO DE CAIXA PROJETADO)
+// HELPERS
+// ============================================================================
+function getDatesFromParams(from?: string, to?: string, month?: string) {
+    const now = new Date();
+    let startDate: Date;
+    let endDate: Date;
+
+    if (from && to) {
+      startDate = new Date(from + "T00:00:00");
+      endDate = new Date(to + "T23:59:59");
+    } else {
+      let dateRef = now;
+      if (month) {
+        const [y, m] = month.split('-');
+        dateRef = new Date(parseInt(y), parseInt(m) - 1, 1);
+      }
+      startDate = startOfMonth(dateRef);
+      endDate = endOfMonth(dateRef);
+    }
+    return { startDate, endDate };
+}
+
+// ============================================================================
+// 1. DASHBOARD OVERVIEW (VISÃO GERAL DO USUÁRIO)
+// ============================================================================
+export async function getDashboardOverviewData(params: { month?: string, from?: string, to?: string }) {
+    const { user } = await validateUser();
+    if (!user) throw new Error("Unauthorized");
+    const workspaceId = await getActiveWorkspaceId(user);
+
+    const globalDates = getDatesFromParams(params.from, params.to, params.month);
+
+    // 1. SALDO TOTAL (Considerando todas as contas do workspace)
+    const rawAccounts = await prisma.bankAccount.findMany({ where: { workspaceId }, orderBy: { name: 'asc' } });
+    const accounts = rawAccounts.map(acc => ({ ...acc, balance: Number(acc.balance) }));
+    const totalBalance = accounts.reduce((acc, a) => acc + a.balance, 0);
+
+    // 2. TOTAIS MENSAIS (Agregação no período selecionado)
+    const incomeAgg = await prisma.transaction.aggregate({
+        _sum: { amount: true },
+        where: { workspaceId, type: 'INCOME', creditCardId: null, date: { gte: globalDates.startDate, lte: globalDates.endDate } }
+    });
+    const expenseAgg = await prisma.transaction.aggregate({
+        _sum: { amount: true },
+        where: { workspaceId, type: 'EXPENSE', creditCardId: null, date: { gte: globalDates.startDate, lte: globalDates.endDate } }
+    });
+
+    // 3. DADOS DO GRÁFICO (Com Saldo Dia/Mês)
+    const chartTransactions = await prisma.transaction.findMany({
+        where: { workspaceId, creditCardId: null, date: { gte: globalDates.startDate, lte: globalDates.endDate } },
+        select: { date: true, amount: true, type: true },
+        orderBy: { date: 'asc' }
+    });
+
+    const diffDays = Math.ceil(Math.abs(globalDates.endDate.getTime() - globalDates.startDate.getTime()) / (1000 * 60 * 60 * 24));
+    const isDailyChart = diffDays <= 35;
+    const chartMap = new Map();
+
+    // Inicializa o mapa com datas zeradas
+    if (isDailyChart) {
+        for (let d = new Date(globalDates.startDate); d <= globalDates.endDate; d.setDate(d.getDate() + 1)) {
+            const key = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+            chartMap.set(key, { name: key, income: 0, expense: 0, balance: 0 });
+        }
+    } else {
+        let d = new Date(globalDates.startDate);
+        while (d <= globalDates.endDate) {
+            const monthKey = d.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '');
+            const formattedKey = monthKey.charAt(0).toUpperCase() + monthKey.slice(1);
+            if (!chartMap.has(formattedKey)) chartMap.set(formattedKey, { name: formattedKey, income: 0, expense: 0, balance: 0 });
+            d.setMonth(d.getMonth() + 1); d.setDate(1);
+        }
+    }
+
+    // Preenche com transações
+    chartTransactions.forEach(t => {
+      let key = '';
+      if (isDailyChart) key = t.date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+      else {
+          const m = t.date.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '');
+          key = m.charAt(0).toUpperCase() + m.slice(1);
+      }
+
+      if (chartMap.has(key)) {
+         const entry = chartMap.get(key);
+         const val = toDecimal(t.amount);
+         if (t.type === 'INCOME') entry.income += val;
+         else if (t.type === 'EXPENSE') entry.expense += val;
+         // Balance Calculation happens next
+      }
+    });
+
+    // Calcula o Saldo (Receita - Despesa) para cada entrada
+    // Nota: Estamos calculando o saldo DO PERÍODO (Dia/Mês), não acumulado.
+    chartMap.forEach(entry => {
+        entry.balance = entry.income - entry.expense;
+    });
+
+    // 4. ORÇAMENTOS
+    const budgets = await prisma.budget.findMany({ where: { workspaceId }, include: { category: true } });
+
+    const expensesByCategory = await prisma.transaction.groupBy({
+        by: ['categoryId'],
+        _sum: { amount: true },
+        where: { workspaceId, type: 'EXPENSE', categoryId: { not: null }, date: { gte: globalDates.startDate, lte: globalDates.endDate } }
+    });
+
+    const expMap = new Map();
+    expensesByCategory.forEach(e => { if(e.categoryId) expMap.set(e.categoryId, toDecimal(e._sum.amount)); });
+
+    const budgetList = budgets.map(b => ({
+        id: b.id, categoryName: b.category?.name || 'Geral', target: Number(b.targetAmount),
+        spent: expMap.get(b.categoryId) || 0
+    }));
+
+    // 5. METAS
+    const rawGoals = await prisma.goal.findMany({ where: { workspaceId }, orderBy: [{ deadline: 'asc' }, { createdAt: 'desc' }], take: 3 });
+    const goals = rawGoals.map(g => ({ ...g, targetAmount: Number(g.targetAmount), currentAmount: Number(g.currentAmount) }));
+
+    return {
+      totalBalance,
+      monthlyIncome: toDecimal(incomeAgg._sum.amount),
+      monthlyExpense: toDecimal(expenseAgg._sum.amount),
+      chartData: Array.from(chartMap.values()),
+      lastTransactions: [],
+      budgets: budgetList,
+      goals,
+      accounts
+    };
+}
+
+// ============================================================================
+// 2. ORÁCULO FINANCEIRO (FLUXO DE CAIXA PROJETADO)
 // ============================================================================
 export async function getTenantOracleData(filterWorkspaceId?: string, dateRange?: { from: Date, to: Date }) {
   const { user } = await validateUser('org_view');
@@ -137,7 +270,7 @@ export async function getTenantOracleData(filterWorkspaceId?: string, dateRange?
 }
 
 // ============================================================================
-// 2. RAIO-X DE ENDIVIDAMENTO
+// 3. RAIO-X DE ENDIVIDAMENTO
 // ============================================================================
 export async function getTenantDebtXRayData(filterWorkspaceId?: string) {
     const { user } = await validateUser('org_view');
@@ -206,7 +339,7 @@ export async function getTenantDebtXRayData(filterWorkspaceId?: string) {
 }
   
 // ============================================================================
-// 3. COMPARATIVO MÊS A MÊS
+// 4. COMPARATIVO MÊS A MÊS
 // ============================================================================
 export async function getWorkspaceCategoryComparison() {
     const { user } = await validateUser();
@@ -268,7 +401,7 @@ export async function getWorkspaceCategoryComparison() {
 }
   
 // ============================================================================
-// 4. ÍNDICE DE SAÚDE FINANCEIRA
+// 5. ÍNDICE DE SAÚDE FINANCEIRA
 // ============================================================================
 export async function getTenantHealthScore(filterWorkspaceId?: string) {
     const { user } = await validateUser('org_view');
@@ -352,7 +485,7 @@ export async function getTenantHealthScore(filterWorkspaceId?: string) {
 }
 
 // ============================================================================
-// 5. ANALYTICS GERAL DO TENANT
+// 6. ANALYTICS GERAL DO TENANT
 // ============================================================================
 export async function getTenantAnalytics(period: string, type?: string, workspaceId?: string) {
     const { user } = await validateUser('org_view');
