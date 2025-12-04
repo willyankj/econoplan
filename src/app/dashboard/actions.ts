@@ -52,7 +52,8 @@ import {
     getTenantOracleData as _getTenantOracleData,
     getTenantDebtXRayData as _getTenantDebtXRayData,
     getTenantHealthScore as _getTenantHealthScore,
-    getTenantAnalytics as _getTenantAnalytics // <--- IMPORTADO AQUI
+    getTenantAnalytics as _getTenantAnalytics,
+    getDashboardOverviewData as _getDashboardOverviewData
 } from './actions/analytics';
 
 
@@ -110,4 +111,5 @@ export const getWorkspaceCategoryComparison = _getWorkspaceCategoryComparison;
 export const getTenantOracleData = _getTenantOracleData;
 export const getTenantDebtXRayData = _getTenantDebtXRayData;
 export const getTenantHealthScore = _getTenantHealthScore;
-export const getTenantAnalytics = _getTenantAnalytics; // <--- EXPORTADO AQUI
+export const getTenantAnalytics = _getTenantAnalytics;
+export const getDashboardOverviewData = _getDashboardOverviewData;
