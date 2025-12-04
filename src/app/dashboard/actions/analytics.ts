@@ -62,7 +62,7 @@ export async function getDashboardOverviewData(params: { month?: string, from?: 
     // 3. DADOS DO GRÁFICO (Com Saldo Dia/Mês)
     const chartTransactions = await prisma.transaction.findMany({
         where: { workspaceId, creditCardId: null, date: { gte: globalDates.startDate, lte: globalDates.endDate } },
-        select: { date: true, amount: true, type: true },
+        select: { date: true, amount: true, type: true, bankAccountId: true, recipientAccountId: true },
         orderBy: { date: 'asc' }
     });
 
@@ -70,18 +70,21 @@ export async function getDashboardOverviewData(params: { month?: string, from?: 
     const isDailyChart = diffDays <= 35;
     const chartMap = new Map();
 
-    // Inicializa o mapa com datas zeradas
+    // Set auxiliar para verificar contas internas do workspace (para cálculo de transferência)
+    const workspaceAccountIds = new Set(rawAccounts.map(a => a.id));
+
+    // Inicializa o mapa com datas zeradas e propriedades auxiliares
     if (isDailyChart) {
         for (let d = new Date(globalDates.startDate); d <= globalDates.endDate; d.setDate(d.getDate() + 1)) {
             const key = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-            chartMap.set(key, { name: key, income: 0, expense: 0, balance: 0 });
+            chartMap.set(key, { name: key, income: 0, expense: 0, balance: 0, netChange: 0 });
         }
     } else {
         let d = new Date(globalDates.startDate);
         while (d <= globalDates.endDate) {
             const monthKey = d.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '');
             const formattedKey = monthKey.charAt(0).toUpperCase() + monthKey.slice(1);
-            if (!chartMap.has(formattedKey)) chartMap.set(formattedKey, { name: formattedKey, income: 0, expense: 0, balance: 0 });
+            if (!chartMap.has(formattedKey)) chartMap.set(formattedKey, { name: formattedKey, income: 0, expense: 0, balance: 0, netChange: 0 });
             d.setMonth(d.getMonth() + 1); d.setDate(1);
         }
     }
@@ -98,38 +101,64 @@ export async function getDashboardOverviewData(params: { month?: string, from?: 
       if (chartMap.has(key)) {
          const entry = chartMap.get(key);
          const val = toDecimal(t.amount);
+
+         // Lógica Visual (Barras): Apenas Income/Expense Operacional
          if (t.type === 'INCOME') entry.income += val;
          else if (t.type === 'EXPENSE') entry.expense += val;
+
+         // Lógica de Saldo (Linha): Considera TUDO que afeta o saldo bancário
+         if (t.type === 'INCOME') {
+             entry.netChange += val;
+         } else if (t.type === 'EXPENSE') {
+             entry.netChange -= val;
+         } else if (t.type === 'VAULT_DEPOSIT') {
+             // Sai da conta (visível) para cofrinho (invisível no totalBalance de contas)
+             entry.netChange -= val;
+         } else if (t.type === 'VAULT_WITHDRAW') {
+             // Entra na conta vindo do cofrinho
+             entry.netChange += val;
+         } else if (t.type === 'TRANSFER') {
+             // Sai da conta de origem (t.bankAccountId)
+             entry.netChange -= val;
+
+             // Se destino for conta do workspace, entra na conta de destino (+val) -> Net 0
+             if (t.recipientAccountId && workspaceAccountIds.has(t.recipientAccountId)) {
+                 entry.netChange += val;
+             }
+         }
       }
     });
 
     // 3.1 CÁLCULO DE SALDO ACUMULADO (RUNNING BALANCE)
-    // 1. Pega saldo atual (Total Balance)
-    // 2. Desconta transações futuras (Entre o fim do gráfico e hoje) para chegar no saldo FINAL do gráfico.
-    // 3. Itera de trás para frente no gráfico para distribuir o saldo.
-
     const today = new Date();
     let endOfChartBalance = totalBalance;
 
-    // Se o gráfico termina no passado (antes de hoje), precisamos ajustar o saldo
+    // Ajuste de Gap (apenas se gráfico termina no passado)
+    // Se termina no futuro ou hoje, assume-se que totalBalance já inclui transações "pagas"
     if (globalDates.endDate < today) {
         const gapTransactions = await prisma.transaction.findMany({
             where: {
                 workspaceId,
                 date: { gt: globalDates.endDate, lte: today },
-                creditCardId: null // Apenas saldo de contas
+                creditCardId: null
             },
-            select: { amount: true, type: true }
+            select: { amount: true, type: true, bankAccountId: true, recipientAccountId: true }
         });
 
         const gapNet = gapTransactions.reduce((acc, t) => {
             const val = toDecimal(t.amount);
             if (t.type === 'INCOME') return acc + val;
             if (t.type === 'EXPENSE') return acc - val;
+            if (t.type === 'VAULT_DEPOSIT') return acc - val;
+            if (t.type === 'VAULT_WITHDRAW') return acc + val;
+            if (t.type === 'TRANSFER') {
+                 let change = -val;
+                 if (t.recipientAccountId && workspaceAccountIds.has(t.recipientAccountId)) change += val;
+                 return acc + change;
+            }
             return acc;
         }, 0);
 
-        // Saldo Final do Gráfico = Saldo Atual - (Receita Gap - Despesa Gap)
         endOfChartBalance = totalBalance - gapNet;
     }
 
@@ -145,9 +174,8 @@ export async function getDashboardOverviewData(params: { month?: string, from?: 
         entry.balance = runningBalance;
 
         // Para a próxima iteração (dia anterior), removemos o efeito do dia atual.
-        // Saldo(Ontem) = Saldo(Hoje) - Receita(Hoje) + Despesa(Hoje)
-        const netChange = entry.income - entry.expense;
-        runningBalance = runningBalance - netChange;
+        // Saldo(Ontem) = Saldo(Hoje) - NetChange(Hoje)
+        runningBalance = runningBalance - entry.netChange;
     }
 
     // 4. ORÇAMENTOS
