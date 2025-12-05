@@ -278,7 +278,7 @@ export async function payCreditCardInvoice(formData: FormData) {
       });
 
       const totalPending = Number(pendingExpenses._sum.amount || 0) - Number(pendingIncomes._sum.amount || 0);
-      
+
       // Margem de erro de R$ 1.00
       if (Math.abs(totalPending - amount) > 1.0) {
            return { error: `O valor do pagamento (R$ ${amount}) diverge do total calculado da fatura (R$ ${totalPending}).` };
@@ -600,13 +600,20 @@ export async function deleteTransaction(id: string) {
 
   try {
     await prisma.$transaction(async (tx) => {
+        // Reversão de Saldo - ORIGEM
         if (t.isPaid && t.bankAccountId) {
             if (t.type === 'INCOME') {
                 await tx.bankAccount.update({ where: { id: t.bankAccountId }, data: { balance: { decrement: t.amount } } });
             } else if (t.type === 'EXPENSE') {
                 await tx.bankAccount.update({ where: { id: t.bankAccountId }, data: { balance: { increment: t.amount } } });
             } else if (t.type === 'TRANSFER' && t.recipientAccountId) {
-                await tx.bankAccount.update({ where: { id: t.bankAccountId }, data: { balance: { increment: t.amount } } });
+                // Transferência: Reverte a SAÍDA da Origem (Incrementa saldo)
+                try {
+                    await tx.bankAccount.update({ where: { id: t.bankAccountId }, data: { balance: { increment: t.amount } } });
+                } catch (err) {
+                    console.error("Erro ao reverter saldo da Origem (Transferência):", err);
+                    throw new Error("Erro ao reverter saldo da Conta Origem.");
+                }
             } else if (t.type === 'VAULT_DEPOSIT') {
                 await tx.bankAccount.update({ where: { id: t.bankAccountId }, data: { balance: { increment: t.amount } } });
             } else if (t.type === 'VAULT_WITHDRAW') {
@@ -614,8 +621,20 @@ export async function deleteTransaction(id: string) {
             }
         }
 
+        // Reversão de Saldo - DESTINO (Apenas Transferência)
         if (t.isPaid && t.recipientAccountId && t.type === 'TRANSFER') {
-            await tx.bankAccount.update({ where: { id: t.recipientAccountId }, data: { balance: { decrement: t.amount } } });
+            // Transferência: Reverte a ENTRADA no Destino (Decrementa saldo)
+            try {
+                await tx.bankAccount.update({ where: { id: t.recipientAccountId }, data: { balance: { decrement: t.amount } } });
+            } catch (err) {
+                console.error("Erro ao reverter saldo do Destino (Transferência):", err);
+                // Se a conta de destino não existir mais, o erro deve ser capturado mas talvez não deva bloquear a exclusão da transação?
+                // Decisão segura: Bloquear e avisar o usuário que a conta destino sumiu, para evitar inconsistência grave.
+                // Mas se a conta sumiu, o dinheiro "sumiu" também.
+                // O ideal é permitir excluir a transação para limpar o histórico.
+                // Mas aqui estamos dentro de uma transaction prisma. Se falhar, reverte tudo (inclusive o estorno da origem).
+                throw new Error("Erro ao reverter saldo da Conta Destino. Verifique se a conta ainda existe.");
+            }
         }
 
         if (t.isPaid && t.vaultId) {
