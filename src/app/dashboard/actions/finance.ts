@@ -286,13 +286,13 @@ export async function payCreditCardInvoice(formData: FormData) {
       }
 
       const category = await prisma.category.upsert({ 
-          where: { workspaceId_name_type: { workspaceId: card.workspaceId, name: "Pagamento de Fatura", type: "EXPENSE" } }, 
-          update: {}, create: { name: "Pagamento de Fatura", type: "EXPENSE", workspaceId: card.workspaceId } 
+          where: { workspaceId_name_type: { workspaceId: card.workspaceId, name: "Pagamento de Fatura", type: "TRANSFER" } },
+          update: {}, create: { name: "Pagamento de Fatura", type: "TRANSFER", workspaceId: card.workspaceId, icon: "CreditCard", color: "#64748b" }
       });
 
       await prisma.$transaction([
           // Registra o pagamento na conta bancária
-          prisma.transaction.create({ data: { description: `Fatura - ${card.name}`, amount, type: "EXPENSE", date, workspaceId: card.workspaceId, bankAccountId: accountId, categoryId: category.id, isPaid: true } }),
+          prisma.transaction.create({ data: { description: `Fatura - ${card.name}`, amount, type: "TRANSFER", date, workspaceId: card.workspaceId, bankAccountId: accountId, categoryId: category.id, isPaid: true, creditCardId: cardId } }),
 
           // Debita da conta bancária
           prisma.bankAccount.update({ where: { id: accountId }, data: { balance: { decrement: amount } } }),
@@ -672,8 +672,10 @@ export async function deleteTransaction(id: string) {
                 await tx.bankAccount.update({ where: { id: t.bankAccountId }, data: { balance: { decrement: t.amount } } });
             } else if (t.type === 'EXPENSE') {
                 await tx.bankAccount.update({ where: { id: t.bankAccountId }, data: { balance: { increment: t.amount } } });
-            } else if (t.type === 'TRANSFER' && t.recipientAccountId) {
-                // Transferência: Reverte a SAÍDA da Origem (Incrementa saldo)
+            } else if (t.type === 'TRANSFER') {
+                // Transferência (ou Pagamento de Fatura): Reverte a SAÍDA da Origem (Incrementa saldo)
+                // Se recipientAccountId existir, é transf entre contas. Se não (como no cartão), é apenas débito na origem.
+                // Em ambos os casos, o dinheiro saiu da origem, então devolvemos.
                 try {
                     await tx.bankAccount.update({ where: { id: t.bankAccountId }, data: { balance: { increment: t.amount } } });
                 } catch (err) {
