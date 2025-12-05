@@ -87,7 +87,6 @@ export default async function TransactionsPage({
     ];
   }
   
-  // CORREÇÃO DOS FILTROS
   if (params.type && params.type !== 'ALL') {
       if (params.type === 'INVESTMENT') {
           whereCondition.type = { in: ['VAULT_DEPOSIT', 'VAULT_WITHDRAW'] };
@@ -110,7 +109,6 @@ export default async function TransactionsPage({
     };
   }
 
-  // PAGINAÇÃO
   const page = Number(params.page) || 1;
   const itemsPerPage = 20;
   const skip = (page - 1) * itemsPerPage;
@@ -134,7 +132,13 @@ export default async function TransactionsPage({
 
   const totalPages = Math.ceil(totalItems / itemsPerPage);
 
-  const transactionsForExport = transactions.map(t => ({
+  // DEDUPLICAÇÃO VISUAL (FIX)
+  // Remove duplicatas baseadas no ID para evitar "2 linhas" se o backend ou join retornar duplicado
+  const uniqueTransactions = transactions.filter((t, index, self) =>
+      index === self.findIndex((t2) => t2.id === t.id)
+  );
+
+  const transactionsForExport = uniqueTransactions.map(t => ({
     description: t.description,
     category: t.category,
     date: t.date,
@@ -188,7 +192,7 @@ export default async function TransactionsPage({
                 </TableRow>
                 </TableHeader>
                 <TableBody>
-                {transactions.map((t) => {
+                {uniqueTransactions.map((t) => {
                     const transactionForModal = {
                         ...t, amount: Number(t.amount), bankAccount: undefined, creditCard: undefined   
                     };
