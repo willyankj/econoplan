@@ -16,9 +16,10 @@ interface PayInvoiceModalProps {
   card: { id: string; name: string; bank: string };
   totalAmount: number;
   accounts: any[];
+  invoicePeriod: { start: Date; end: Date };
 }
 
-export function PayInvoiceModal({ card, totalAmount, accounts }: PayInvoiceModalProps) {
+export function PayInvoiceModal({ card, totalAmount, accounts, invoicePeriod }: PayInvoiceModalProps) {
   const [open, setOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
@@ -29,7 +30,10 @@ export function PayInvoiceModal({ card, totalAmount, accounts }: PayInvoiceModal
     
     const formData = new FormData(event.currentTarget);
     formData.set('date', date);
-    formData.set('amount', totalAmount.toString()); // Força envio do valor exato
+    formData.set('amount', totalAmount.toString());
+    // Passar o período exato da fatura que está sendo paga
+    formData.set('startDate', invoicePeriod.start.toISOString());
+    formData.set('endDate', invoicePeriod.end.toISOString());
     
     const result = await payCreditCardInvoice(formData);
     setIsLoading(false);

@@ -70,6 +70,8 @@ const PayInvoiceSchema = z.object({
   accountId: z.string().uuid(),
   amount: z.coerce.number().positive(),
   date: z.string(),
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
 });
 
 // --- SCHEMAS PARA COFRINHOS E MOVIMENTAÇÃO ---
@@ -237,22 +239,49 @@ export async function payCreditCardInvoice(formData: FormData) {
   const parsed = PayInvoiceSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { error: "Dados inválidos" };
   
-  const { cardId, accountId, amount, date: dateStr } = parsed.data;
+  const { cardId, accountId, amount, date: dateStr, startDate, endDate } = parsed.data;
   const date = new Date(dateStr + "T12:00:00");
 
   const card = await prisma.creditCard.findUnique({ where: { id: cardId } });
   if(!card) return { error: "Cartão inválido" };
 
   try {
+      // Definir o range de datas para buscar as transações da fatura
+      // Se startDate e endDate forem fornecidos, usa o range exato da fatura.
+      // Caso contrário, mantém o comportamento antigo (tudo até a data de pagamento).
+      const dateFilter: any = {};
+
+      if (startDate && endDate) {
+          dateFilter.gte = new Date(startDate);
+          dateFilter.lte = new Date(endDate);
+      } else {
+          dateFilter.lte = date;
+      }
+
       const pendingTransactions = await prisma.transaction.aggregate({
-          where: { creditCardId: cardId, isPaid: false, date: { lte: date } },
+          where: { creditCardId: cardId, isPaid: false, date: dateFilter },
           _sum: { amount: true }
       });
       
-      const totalPending = Number(pendingTransactions._sum.amount || 0);
+      // Cálculo considerando estornos (Income dentro da fatura)
+      // O aggregate acima soma TUDO (amount). Se tiver INCOME e EXPENSE misturado, a soma direta pode estar errada se INCOME for positivo no DB e EXPENSE também.
+      // No DB: Amount é sempre positivo. Type define o sinal.
+      // Precisamos somar separadamente.
+
+      const pendingExpenses = await prisma.transaction.aggregate({
+          where: { creditCardId: cardId, isPaid: false, date: dateFilter, type: 'EXPENSE' },
+          _sum: { amount: true }
+      });
+      const pendingIncomes = await prisma.transaction.aggregate({
+          where: { creditCardId: cardId, isPaid: false, date: dateFilter, type: 'INCOME' },
+          _sum: { amount: true }
+      });
+
+      const totalPending = Number(pendingExpenses._sum.amount || 0) - Number(pendingIncomes._sum.amount || 0);
       
+      // Margem de erro de R$ 1.00
       if (Math.abs(totalPending - amount) > 1.0) {
-           return { error: `O valor do pagamento (R$ ${amount}) diverge do total da fatura (R$ ${totalPending}).` };
+           return { error: `O valor do pagamento (R$ ${amount}) diverge do total calculado da fatura (R$ ${totalPending}).` };
       }
 
       const category = await prisma.category.upsert({ 
@@ -261,13 +290,21 @@ export async function payCreditCardInvoice(formData: FormData) {
       });
 
       await prisma.$transaction([
+          // Registra o pagamento na conta bancária
           prisma.transaction.create({ data: { description: `Fatura - ${card.name}`, amount, type: "EXPENSE", date, workspaceId: card.workspaceId, bankAccountId: accountId, categoryId: category.id, isPaid: true } }),
+
+          // Debita da conta bancária
           prisma.bankAccount.update({ where: { id: accountId }, data: { balance: { decrement: amount } } }),
-          prisma.transaction.updateMany({ where: { creditCardId: cardId, isPaid: false, date: { lte: date } }, data: { isPaid: true } })
+
+          // Marca as transações da fatura como pagas
+          prisma.transaction.updateMany({ where: { creditCardId: cardId, isPaid: false, date: dateFilter }, data: { isPaid: true } })
       ]);
 
       await createAuditLog({ tenantId: user.tenantId, userId: user.id, action: 'ACTION', entity: 'Card', details: `Pagou fatura ${card.name}` });
-  } catch (e) { return { error: "Erro no pagamento." }; }
+  } catch (e: any) {
+      console.error(e);
+      return { error: "Erro no pagamento." };
+  }
 
   revalidatePath('/dashboard');
   return { success: true };

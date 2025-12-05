@@ -1,4 +1,5 @@
 import { TransactionType } from "@prisma/client";
+import { addMonths, subMonths, startOfDay, endOfDay, isBefore, isAfter, isSameDay, endOfMonth } from "date-fns";
 
 // ============================================================================
 // CONSTANTES DE TIPOS
@@ -74,4 +75,107 @@ export const normalizeTransactionGroup = (type: TransactionType | string): 'INCO
     if (type === 'TRANSFER') return 'TRANSFER';
     if (type === 'VAULT_DEPOSIT' || type === 'VAULT_WITHDRAW') return 'INVESTMENT';
     return 'EXPENSE'; // Fallback seguro
+};
+
+// ============================================================================
+// LÓGICA DE FATURAS DE CARTÃO DE CRÉDITO
+// ============================================================================
+
+export type InvoiceStatus = 'OPEN' | 'CLOSED' | 'OVERDUE' | 'PAID' | 'FUTURE';
+
+export interface InvoiceData {
+    periodStart: Date;
+    periodEnd: Date;
+    closingDate: Date;
+    dueDate: Date;
+    status: InvoiceStatus;
+    monthLabel: string; // Ex: "Dezembro"
+    isCurrent: boolean;
+}
+
+/**
+ * Calcula os dados da fatura para um determinado mês de referência.
+ * @param closingDay Dia do fechamento da fatura (ex: 3)
+ * @param dueDay Dia do vencimento da fatura (ex: 10)
+ * @param referenceDate Data de referência para identificar qual fatura queremos (pode ser qualquer dia do mês da fatura desejada)
+ */
+export const getInvoiceData = (closingDay: number, dueDay: number, referenceDate: Date): InvoiceData => {
+    const year = referenceDate.getFullYear();
+    const month = referenceDate.getMonth();
+
+    // Helper to safely set day (clamping to end of month)
+    const getSafeDate = (y: number, m: number, d: number) => {
+        const date = new Date(y, m, 1);
+        const lastDay = endOfMonth(date).getDate();
+        return new Date(y, m, Math.min(d, lastDay));
+    };
+
+    // Data de Fechamento da Fatura deste mês
+    let closingDate = getSafeDate(year, month, closingDay);
+
+    // Data de Vencimento
+    let dueDate = getSafeDate(year, month, dueDay);
+
+    // Ajuste de vencimento se for menor que o fechamento (vira mês seguinte)
+    if (dueDay < closingDay) {
+        dueDate = addMonths(dueDate, 1);
+    }
+
+    // Período de Compras:
+    // Termina no dia anterior ao fechamento atual.
+    const periodEnd = new Date(closingDate);
+    periodEnd.setDate(periodEnd.getDate() - 1);
+
+    // Começa no dia do fechamento do mês anterior.
+    // Para garantir segurança em meses com menos dias, usamos subMonths na closingDate
+    // Mas precisamos recalcular o "closingDay" no mês anterior para lidar com o problema de 31 -> 28.
+    // Ex: Fecha dia 31/03. Mês anterior é Fev. Deve fechar 28/02.
+    // subMonths(31/03, 1) -> 28/02.
+    // Então prevMonthClosingDate é 28/02.
+    // Isso é exatamente o que queremos: dia de fechamento DO mês anterior.
+    const prevMonthClosingDate = subMonths(closingDate, 1);
+
+    const periodStart = startOfDay(prevMonthClosingDate);
+
+    // Determinar Status
+    let status: InvoiceStatus = 'OPEN';
+
+    // Ajuste de horas para comparação (Início do dia vs Fim do dia)
+    const now = new Date();
+
+    // Se hoje é antes da data de fechamento => ABERTA
+    if (isBefore(now, startOfDay(closingDate))) {
+        status = 'OPEN';
+    }
+    // Se hoje é depois do fechamento, mas antes do vencimento => FECHADA (Aguardando pagto)
+    else if (isAfter(now, startOfDay(closingDate)) && isBefore(now, endOfDay(dueDate))) {
+        status = 'CLOSED';
+    }
+    // Se hoje é depois do vencimento => VENCIDA (assumindo que não foi paga, a verificação de pagto é externa)
+    else if (isAfter(now, endOfDay(dueDate))) {
+        status = 'OVERDUE';
+    }
+
+    // Se a referência for um mês futuro em relação a hoje
+    if (isAfter(startOfDay(referenceDate), addMonths(new Date(), 0)) && referenceDate.getMonth() !== new Date().getMonth()) {
+         status = 'FUTURE';
+    }
+
+    // Label do Mês (Nome do mês da data de fechamento/vencimento)
+    const monthLabel = closingDate.toLocaleString('pt-BR', { month: 'long' });
+
+    // isCurrent? É a fatura que está "rolando" hoje?
+    // Uma fatura é corrente se HOJE estiver dentro de [periodStart, periodEnd].
+    const isCurrent = (isAfter(now, periodStart) || isSameDay(now, periodStart)) &&
+                      (isBefore(now, periodEnd) || isSameDay(now, periodEnd));
+
+    return {
+        periodStart: startOfDay(periodStart),
+        periodEnd: endOfDay(periodEnd),
+        closingDate: startOfDay(closingDate),
+        dueDate: endOfDay(dueDate),
+        status,
+        monthLabel: monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1),
+        isCurrent
+    };
 };
