@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ArrowDownRight, ArrowUpRight, Briefcase, PiggyBank } from "lucide-react"; 
 import { formatCurrency } from "@/lib/utils"; 
+import { DeleteTransactionButton } from "@/app/dashboard/transactions/delete-button";
 
 interface Transaction {
   id: string;
@@ -24,25 +25,27 @@ export function TenantRecentTransactions({ transactions }: { transactions: Trans
         <CardTitle className="text-lg text-foreground">Últimas Movimentações da Organização</CardTitle>
       </CardHeader>
       <CardContent className="p-0">
-        <Table>
-            <TableHeader>
-                <TableRow className="hover:bg-transparent border-border">
-                    <TableHead className="w-[30%]">Descrição</TableHead>
-                    <TableHead>Workspace</TableHead>
-                    <TableHead>Categoria</TableHead>
-                    <TableHead>Data</TableHead>
-                    <TableHead className="text-right">Valor</TableHead>
-                </TableRow>
-            </TableHeader>
-            <TableBody>
-                {transactions.length === 0 ? (
-                    <TableRow>
-                        <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
-                            Nenhuma movimentação recente.
-                        </TableCell>
+        <div className="overflow-x-auto">
+            <Table>
+                <TableHeader>
+                    <TableRow className="hover:bg-transparent border-border">
+                        <TableHead className="w-[30%]">Descrição</TableHead>
+                        <TableHead>Workspace</TableHead>
+                        <TableHead>Categoria</TableHead>
+                        <TableHead>Data</TableHead>
+                        <TableHead className="text-right">Valor</TableHead>
+                        <TableHead className="w-[50px]"></TableHead>
                     </TableRow>
-                ) : (
-                    transactions.map((t) => {
+                </TableHeader>
+                <TableBody>
+                    {transactions.length === 0 ? (
+                        <TableRow>
+                            <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                                Nenhuma movimentação recente.
+                            </TableCell>
+                        </TableRow>
+                    ) : (
+                        transactions.map((t) => {
                         // --- CORREÇÃO AQUI: Verifica os novos nomes "Metas" e "Resgate de Metas" ---
                         const isInvestment = 
                             t.category?.name === "Metas" || 
@@ -83,11 +86,15 @@ export function TenantRecentTransactions({ transactions }: { transactions: Trans
                             <TableCell className={`text-right font-bold ${t.type === 'INCOME' ? 'text-emerald-500' : 'text-rose-500'}`}>
                                 {t.type === 'INCOME' ? '+' : '-'} {formatCurrency(Number(t.amount))}
                             </TableCell>
+                            <TableCell>
+                                <DeleteTransactionButton id={t.id} />
+                            </TableCell>
                         </TableRow>
                     )})
                 )}
-            </TableBody>
-        </Table>
+                </TableBody>
+            </Table>
+        </div>
       </CardContent>
     </Card>
   );

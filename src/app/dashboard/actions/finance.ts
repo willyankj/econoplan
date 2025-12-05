@@ -126,10 +126,6 @@ export async function upsertAccount(formData: FormData, id?: string) {
   
   revalidatePath('/dashboard');
   revalidatePath('/dashboard/organization');
-  revalidatePath('/dashboard/organization');
-  revalidatePath('/dashboard/organization');
-  revalidatePath('/dashboard/organization');
-  revalidatePath('/dashboard/organization');
   return { success: true };
 }
 
@@ -733,6 +729,7 @@ export async function deleteTransaction(id: string) {
 
   revalidatePath('/dashboard');
   revalidatePath('/dashboard/goals');
+  revalidatePath('/dashboard/organization');
   return { success: true };
 }
 

@@ -50,27 +50,27 @@ export function TenantOverviewCharts({ data }: TenantOverviewChartsProps) {
     <div className="space-y-6">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <Card className="bg-card border-border shadow-sm">
-          <CardContent className="p-6 flex flex-col gap-1">
+          <CardContent className="p-6 flex flex-col gap-1 overflow-hidden">
             <span className="text-xs font-medium text-muted-foreground flex items-center gap-1"><ArrowUpRight className="w-3 h-3 text-emerald-500"/> Receitas</span>
-            <span className="text-2xl font-bold text-foreground">{formatCurrency(data.totals.income)}</span>
+            <span className="text-2xl font-bold text-foreground truncate" title={formatCurrency(data.totals.income)}>{formatCurrency(data.totals.income)}</span>
           </CardContent>
         </Card>
         <Card className="bg-card border-border shadow-sm">
-          <CardContent className="p-6 flex flex-col gap-1">
+          <CardContent className="p-6 flex flex-col gap-1 overflow-hidden">
             <span className="text-xs font-medium text-muted-foreground flex items-center gap-1"><ArrowDownRight className="w-3 h-3 text-rose-500"/> Despesas</span>
-            <span className="text-2xl font-bold text-foreground">{formatCurrency(data.totals.expense)}</span>
+            <span className="text-2xl font-bold text-foreground truncate" title={formatCurrency(data.totals.expense)}>{formatCurrency(data.totals.expense)}</span>
           </CardContent>
         </Card>
         <Card className="bg-card border-border shadow-sm">
-          <CardContent className="p-6 flex flex-col gap-1">
+          <CardContent className="p-6 flex flex-col gap-1 overflow-hidden">
             <span className="text-xs font-medium text-muted-foreground flex items-center gap-1"><ArrowRightLeft className="w-3 h-3 text-blue-500"/> Transferências</span>
-            <span className="text-2xl font-bold text-foreground">{formatCurrency(data.totals.transfer)}</span>
+            <span className="text-2xl font-bold text-foreground truncate" title={formatCurrency(data.totals.transfer)}>{formatCurrency(data.totals.transfer)}</span>
           </CardContent>
         </Card>
         <Card className="bg-card border-border shadow-sm">
-          <CardContent className="p-6 flex flex-col gap-1">
+          <CardContent className="p-6 flex flex-col gap-1 overflow-hidden">
             <span className="text-xs font-medium text-muted-foreground flex items-center gap-1"><PiggyBank className="w-3 h-3 text-amber-500"/> Metas/Aportes</span>
-            <span className="text-2xl font-bold text-foreground">{formatCurrency(data.totals.investment)}</span>
+            <span className="text-2xl font-bold text-foreground truncate" title={formatCurrency(data.totals.investment)}>{formatCurrency(data.totals.investment)}</span>
           </CardContent>
         </Card>
       </div>
