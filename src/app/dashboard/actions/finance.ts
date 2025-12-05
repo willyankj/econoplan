@@ -125,6 +125,11 @@ export async function upsertAccount(formData: FormData, id?: string) {
   } catch (e) { return { error: "Erro ao salvar conta." }; }
   
   revalidatePath('/dashboard');
+  revalidatePath('/dashboard/organization');
+  revalidatePath('/dashboard/organization');
+  revalidatePath('/dashboard/organization');
+  revalidatePath('/dashboard/organization');
+  revalidatePath('/dashboard/organization');
   return { success: true };
 }
 
@@ -398,6 +403,7 @@ export async function upsertTransaction(formData: FormData, id?: string) {
         });
         revalidatePath('/dashboard');
         revalidatePath('/dashboard/goals');
+        revalidatePath('/dashboard/organization');
         return { success: true };
       } catch (e: any) {
           return { error: e.message || "Erro na movimentação de meta." };
@@ -440,6 +446,7 @@ export async function upsertTransaction(formData: FormData, id?: string) {
               await tx.bankAccount.update({ where: { id: destinationAccountId }, data: { balance: { increment: amount } } });
           });
           revalidatePath('/dashboard');
+          revalidatePath('/dashboard/organization');
           return { success: true };
       } catch (e) { return { error: "Erro na transferência." }; }
   }
@@ -478,18 +485,78 @@ export async function upsertTransaction(formData: FormData, id?: string) {
                   oldT.recipientAccountId ||
                   oldT.vaultId;
 
+              // LÓGICA DE ATUALIZAÇÃO PARA TRANSFERÊNCIAS (Complexas)
               if (isComplexTransaction) {
-                  // Se tentar mudar o valor ou o tipo...
-                  if (amount !== Number(oldT.amount) || type !== oldT.type) {
-                       throw new Error("Para alterar o valor ou tipo de Transferências ou Investimentos, por favor exclua a transação e crie novamente para garantir a integridade dos saldos.");
-                  }
-                  // Permitir apenas alteração de data, descrição e categoria (se não afetar lógica financeira)
-              }
+                  const isTransfer = oldT.type === 'TRANSFER' && type === 'TRANSFER';
 
-              await tx.transaction.update({ 
-                  where: { id }, 
-                  data: { description, date: baseDate, categoryId: catId }
-              });
+                  // Se for transferência e mudou contas ou valor, precisa reverter e reaplicar
+                  if (isTransfer) {
+                      const accountsChanged = oldT.bankAccountId !== accountId || oldT.recipientAccountId !== destinationAccountId;
+                      const amountChanged = Number(oldT.amount) !== amount;
+
+                      if (accountsChanged || amountChanged) {
+                          // 1. Reverter saldos antigos
+                          if (oldT.bankAccountId) {
+                              await tx.bankAccount.update({ where: { id: oldT.bankAccountId }, data: { balance: { increment: oldT.amount } } });
+                          }
+                          if (oldT.recipientAccountId) {
+                              await tx.bankAccount.update({ where: { id: oldT.recipientAccountId }, data: { balance: { decrement: oldT.amount } } });
+                          }
+
+                          // 2. Validar saldo na nova origem (se mudou ou se valor aumentou)
+                          // Se a conta de origem é a mesma, ela já foi "reembolsada" no passo 1, então o saldo disponível é (saldo_atual + valor_antigo).
+                          // Se mudou a conta, verifica o saldo da nova.
+                          if (accountId) {
+                              const sourceBalanceCheck = await tx.bankAccount.findUnique({ where: { id: accountId } });
+                              if (!sourceBalanceCheck || Number(sourceBalanceCheck.balance) < amount) {
+                                  throw new Error(`Saldo insuficiente na conta de origem: ${sourceBalanceCheck?.name}`);
+                              }
+                          }
+
+                          // 3. Aplicar novos saldos
+                          if (accountId) {
+                              await tx.bankAccount.update({ where: { id: accountId }, data: { balance: { decrement: amount } } });
+                          }
+                          if (destinationAccountId) {
+                              await tx.bankAccount.update({ where: { id: destinationAccountId }, data: { balance: { increment: amount } } });
+                          }
+
+                          // 4. Atualizar transação completa
+                          await tx.transaction.update({
+                              where: { id },
+                              data: {
+                                  description,
+                                  date: baseDate,
+                                  categoryId: catId,
+                                  amount,
+                                  bankAccountId: accountId,
+                                  recipientAccountId: destinationAccountId
+                              }
+                          });
+                      } else {
+                          // Apenas dados textuais mudaram
+                          await tx.transaction.update({
+                              where: { id },
+                              data: { description, date: baseDate, categoryId: catId }
+                          });
+                      }
+                  } else {
+                      // Outros tipos complexos (Investimentos) ainda bloqueados por segurança ou implementados futuramente
+                      if (amount !== Number(oldT.amount) || type !== oldT.type) {
+                           throw new Error("Para alterar o valor ou tipo de Investimentos, por favor exclua a transação e crie novamente.");
+                      }
+                      await tx.transaction.update({
+                          where: { id },
+                          data: { description, date: baseDate, categoryId: catId }
+                      });
+                  }
+              } else {
+                  // Tipos Simples (Income/Expense)
+                  await tx.transaction.update({
+                      where: { id },
+                      data: { description, date: baseDate, categoryId: catId }
+                  });
+              }
 
               // Atualização de saldo APENAS para Income/Expense simples
               if (!isComplexTransaction && oldT.isPaid && oldT.bankAccountId) {
@@ -506,6 +573,7 @@ export async function upsertTransaction(formData: FormData, id?: string) {
                   }
               }
           });
+          revalidatePath('/dashboard/organization');
           return { success: true };
       } catch (e: any) { return { error: e.message || "Erro ao atualizar transação." }; }
   }
@@ -581,6 +649,8 @@ export async function upsertTransaction(formData: FormData, id?: string) {
 
   revalidatePath('/dashboard');
   revalidatePath('/dashboard/goals');
+  revalidatePath('/dashboard/organization');
+  revalidatePath('/dashboard/organization');
   return { success: true };
 }
 
@@ -767,6 +837,7 @@ export async function importTransactions(accountId: string, rawTransactions: any
     revalidatePath('/dashboard/transactions'); 
     revalidatePath('/dashboard/accounts'); 
     revalidatePath('/dashboard');
+    revalidatePath('/dashboard/organization');
     return { success: true };
 }
 
